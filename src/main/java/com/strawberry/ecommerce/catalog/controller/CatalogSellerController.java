@@ -1,7 +1,11 @@
 package com.strawberry.ecommerce.catalog.controller;
 
+import com.strawberry.ecommerce.catalog.dto.ProductMetadataRequestDto;
+import com.strawberry.ecommerce.catalog.dto.VariantInventoryRequestDto;
+import com.strawberry.ecommerce.catalog.dto.VariantPricingRequestDto;
+import com.strawberry.ecommerce.catalog.dto.ProductResponseDto;
 import com.strawberry.ecommerce.catalog.entity.Product;
-import com.strawberry.ecommerce.catalog.repository.ProductRepository;
+import com.strawberry.ecommerce.catalog.service.CatalogService;
 import com.strawberry.ecommerce.common.security.UserDetailsImpl;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,20 +25,15 @@ import java.util.UUID;
 @Tag(name = "Seller Catalog", description = "Endpoints for sellers to manage their synced products")
 public class CatalogSellerController {
 
-    private final ProductRepository productRepository;
+    private final CatalogService catalogService;
 
     @GetMapping
     @PreAuthorize("hasRole('SELLER')")
     @Operation(summary = "Get all products for the authenticated seller's shop")
-    public ResponseEntity<Page<Product>> getMyProducts(
+    public ResponseEntity<Page<ProductResponseDto>> getMyProducts(
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             Pageable pageable) {
-        
-        // MVP logic: In a real app we query by shopId which belongs to the user.
-        // Assuming user -> 1 shop mapping in MVP
-        // Temporarily returning findAll to satisfy interface till shop-filter is wired.
-        Page<Product> products = productRepository.findAll(pageable);
-        return ResponseEntity.ok(products);
+        return ResponseEntity.ok(catalogService.getMyProducts(userDetails.getId(), pageable));
     }
 
     @GetMapping("/{productId}")
@@ -43,9 +42,39 @@ public class CatalogSellerController {
     public ResponseEntity<Product> getProductDetail(
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID productId) {
-        
-        return productRepository.findById(productId)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.ok(catalogService.getProductDetail(userDetails.getId(), productId));
+    }
+
+    @PutMapping("/{productId}/metadata")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Update product metadata (local title, description, visibility)")
+    public ResponseEntity<Void> updateMetadata(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID productId,
+            @RequestBody ProductMetadataRequestDto request) {
+        catalogService.updateProductMetadata(userDetails.getId(), productId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/variants/{variantId}/pricing")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Update variant pricing")
+    public ResponseEntity<Void> updatePricing(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID variantId,
+            @RequestBody VariantPricingRequestDto request) {
+        catalogService.updateVariantPricing(userDetails.getId(), variantId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/variants/{variantId}/inventory")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Update variant inventory")
+    public ResponseEntity<Void> updateInventory(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID variantId,
+            @RequestBody VariantInventoryRequestDto request) {
+        catalogService.updateVariantInventory(userDetails.getId(), variantId, request);
+        return ResponseEntity.noContent().build();
     }
 }

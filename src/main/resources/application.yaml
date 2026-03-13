@@ -38,3 +38,9 @@ logging:
   level:
     org.springframework.security: DEBUG
     com.strawberry.ecommerce: DEBUG
+    org.hibernate.orm.query: DEBUG
+    org.springframework.data.repository: DEBUG
+    org.springframework.beans.factory: DEBUG
+
+cloudinary:
+  url: ${CLOUDINARY_URL:cloudinary://757756855785918:8sHbfy31VUhMcQZAzv2kHIgdfSs@doavuniwt}

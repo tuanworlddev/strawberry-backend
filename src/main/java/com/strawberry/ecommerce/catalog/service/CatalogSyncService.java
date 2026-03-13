@@ -8,7 +8,9 @@ import com.strawberry.ecommerce.shop.entity.Shop;
 import com.strawberry.ecommerce.sync.entity.SyncJob;
 import com.strawberry.ecommerce.sync.entity.SyncStatus;
 import com.strawberry.ecommerce.sync.entity.SyncType;
+import com.strawberry.ecommerce.sync.dto.SyncJobMessage;
 import com.strawberry.ecommerce.sync.repository.SyncJobRepository;
+import com.strawberry.ecommerce.sync.service.SyncMessageProducer;
 import com.strawberry.ecommerce.wb.client.WildberriesApiClient;
 import com.strawberry.ecommerce.wb.dto.WbCardsRequestDto;
 import com.strawberry.ecommerce.wb.dto.WbCardsResponseDto;
@@ -39,114 +41,140 @@ public class CatalogSyncService {
     private final WildberriesApiClient apiClient;
     private final WbCatalogMapper mapper;
     private final EncryptionUtils encryptionUtils;
+    private final SyncMessageProducer producer;
+    private final SlugService slugService;
 
     @Transactional
-    public void processSyncJob(UUID syncJobId) {
-        SyncJob job = syncJobRepository.findById(syncJobId)
-                .orElseThrow(() -> new IllegalArgumentException("SyncJob not found: " + syncJobId));
+    public void processSyncJob(SyncJobMessage message) {
+        long startTime = System.currentTimeMillis();
+        SyncJob job = syncJobRepository.findById(message.getSyncJobId())
+                .orElseThrow(() -> new IllegalArgumentException("SyncJob not found: " + message.getSyncJobId()));
 
-        job.setStatus(SyncStatus.RUNNING);
-        syncJobRepository.save(job);
-
-        ShopWbIntegration integration = integrationRepository.findByShopId(job.getShop().getId())
+        ShopWbIntegration integration = integrationRepository.findById(message.getIntegrationId())
                 .orElseThrow(() -> new IllegalStateException("Integration not found for shop"));
 
-        String apiKey = null;
         try {
-            apiKey = encryptionUtils.decrypt(integration.getApiKeyEncrypted());
-        } catch (Exception e) {
-            failJob(job, "Failed to decrypt API Key");
-            return;
-        }
+            job.setStatus(SyncStatus.RUNNING);
+            job.setStartedAt(ZonedDateTime.now());
+            syncJobRepository.save(job);
 
-        WbCardsRequestDto requestDto = buildRequest(job.getSyncType(), integration);
+            executeSyncWithMetrics(job, integration, message);
 
-        int totalFetched = 0, totalCreated = 0, totalUpdated = 0, totalFailed = 0;
-        WbCardsResponseDto.Cursor lastCursor = null;
-
-        try {
-            while (true) {
-                WbCardsResponseDto response = apiClient.fetchCards(apiKey, requestDto);
-                List<WbCardsResponseDto.Card> cards = response.getCards();
-
-                if (cards == null || cards.isEmpty()) {
-                    break;
-                }
-
-                totalFetched += cards.size();
-
-                for (WbCardsResponseDto.Card card : cards) {
-                    try {
-                        boolean isNew = upsertProduct(job.getShop(), card);
-                        if (isNew)
-                            totalCreated++;
-                        else
-                            totalUpdated++;
-                    } catch (Exception e) {
-                        log.error("Failed to upsert product {}: {}", card.getNmID(), e.getMessage());
-                        totalFailed++;
-                    }
-                }
-
-                // WB cursor logic
-                lastCursor = response.getCursor();
-                if (cards.size() < requestDto.getSettings().getCursor().getLimit()) {
-                    break; // No more pages
-                }
-
-                // Update cursor for next request
-                requestDto.getSettings().getCursor().setUpdatedAt(lastCursor.getUpdatedAt());
-                requestDto.getSettings().getCursor().setNmID(lastCursor.getNmID());
-
-                // Rate limiting
-                Thread.sleep(600);
-            }
-
-            // Update Integration Cursor
-            if (lastCursor != null && lastCursor.getUpdatedAt() != null) {
-                integration.setLastCursorNmId(lastCursor.getNmID());
-                integration.setLastCursorUpdatedAt(ZonedDateTime.parse(lastCursor.getUpdatedAt())); // Assuming ISO
-                                                                                                    // string is
-                                                                                                    // compliant
-            }
-            integration.setLastSyncAt(ZonedDateTime.now());
-
-            // Finalize Job
-            job.setTotalFetched(totalFetched);
-            job.setTotalCreated(totalCreated);
-            job.setTotalUpdated(totalUpdated);
-            job.setTotalFailed(totalFailed);
+            // Success: update job status
             job.setFinishedAt(ZonedDateTime.now());
-
-            if (totalFailed > 0 && (totalCreated > 0 || totalUpdated > 0)) {
+            job.setDurationMs(System.currentTimeMillis() - startTime);
+            
+            if (job.getTotalFailed() > 0 && (job.getTotalCreated() > 0 || job.getTotalUpdated() > 0)) {
                 job.setStatus(SyncStatus.PARTIAL_SUCCESS);
                 integration.setLastSyncStatus("PARTIAL_SUCCESS");
-            } else if (totalFailed > 0 && totalCreated == 0 && totalUpdated == 0) {
+            } else if (job.getTotalFailed() > 0 && job.getTotalCreated() == 0 && job.getTotalUpdated() == 0) {
                 job.setStatus(SyncStatus.FAILED);
                 job.setErrorSummary("All rows failed to insert");
                 integration.setLastSyncStatus("FAILED");
             } else {
                 job.setStatus(SyncStatus.SUCCESS);
                 integration.setLastSyncStatus("SUCCESS");
+                integration.setConsecutiveFailureCount(0); // Reset on success
             }
 
             syncJobRepository.save(job);
+
+            // Update Integration metrics
+            integration.setLastSyncAt(ZonedDateTime.now());
+            integration.setLastSyncDurationMs(job.getDurationMs());
             integrationRepository.save(integration);
 
+            log.info("Sync Job {} completed with status {} in {}ms", job.getId(), job.getStatus(), job.getDurationMs());
+
         } catch (Exception e) {
-            log.error("Sync Job Failed: {}", e.getMessage(), e);
-            failJob(job, e.getMessage());
+            handleSyncFailure(job, integration, message, e, startTime);
+        }
+    }
+
+    private void executeSyncWithMetrics(SyncJob job, ShopWbIntegration integration, SyncJobMessage message) throws Exception {
+        String apiKey = encryptionUtils.decrypt(integration.getApiKeyEncrypted());
+        WbCardsRequestDto requestDto = buildRequest(message.getSyncType(), integration);
+
+        int totalFetched = 0, totalCreated = 0, totalUpdated = 0, totalFailed = 0;
+        WbCardsResponseDto.Cursor lastCursor = null;
+
+        while (true) {
+            WbCardsResponseDto response = apiClient.fetchCards(apiKey, requestDto);
+            List<WbCardsResponseDto.Card> cards = response.getCards();
+
+            if (cards == null || cards.isEmpty()) {
+                break;
+            }
+
+            totalFetched += cards.size();
+
+            for (WbCardsResponseDto.Card card : cards) {
+                try {
+                    boolean isNew = upsertProduct(job.getShop(), card);
+                    if (isNew) totalCreated++;
+                    else totalUpdated++;
+                } catch (Exception e) {
+                    log.error("Failed to upsert product {}: {}", card.getNmID(), e.getMessage());
+                    totalFailed++;
+                }
+            }
+
+            lastCursor = response.getCursor();
+            if (cards.size() < requestDto.getSettings().getCursor().getLimit()) {
+                break;
+            }
+
+            requestDto.getSettings().getCursor().setUpdatedAt(lastCursor.getUpdatedAt());
+            requestDto.getSettings().getCursor().setNmID(lastCursor.getNmID());
+
+            Thread.sleep(600);
+        }
+
+        // Update counts in job object
+        job.setTotalFetched(totalFetched);
+        job.setTotalCreated(totalCreated);
+        job.setTotalUpdated(totalUpdated);
+        job.setTotalFailed(totalFailed);
+
+        // Update Integration Cursor
+        if (lastCursor != null && lastCursor.getUpdatedAt() != null) {
+            integration.setLastCursorNmId(lastCursor.getNmID());
+            integration.setLastCursorUpdatedAt(ZonedDateTime.parse(lastCursor.getUpdatedAt()));
+        }
+    }
+
+    private void handleSyncFailure(SyncJob job, ShopWbIntegration integration, SyncJobMessage message, Exception e, long startTime) {
+        log.error("Sync Job {} Failed: {}", job.getId(), e.getMessage(), e);
+        
+        boolean isTransient = isTransientError(e);
+        int maxAttempts = 3;
+
+        if (isTransient && message.getAttemptNumber() < maxAttempts) {
+            log.info("Retrying transient error for sync job {} (Attempt {})", job.getId(), message.getAttemptNumber() + 1);
+            message.setAttemptNumber(message.getAttemptNumber() + 1);
+            producer.publishSyncJob(message);
+        } else {
+            job.setStatus(SyncStatus.FAILED);
+            job.setErrorSummary(e.getMessage());
+            job.setFinishedAt(ZonedDateTime.now());
+            job.setDurationMs(System.currentTimeMillis() - startTime);
+            syncJobRepository.save(job);
+
+            integration.setLastSyncAt(ZonedDateTime.now());
             integration.setLastSyncStatus("FAILED");
             integration.setLastErrorMessage(e.getMessage());
+            integration.setConsecutiveFailureCount(integration.getConsecutiveFailureCount() + 1);
+            integration.setLastSyncDurationMs(job.getDurationMs());
             integrationRepository.save(integration);
         }
     }
 
-    private void failJob(SyncJob job, String message) {
-        job.setStatus(SyncStatus.FAILED);
-        job.setErrorSummary(message);
-        job.setFinishedAt(ZonedDateTime.now());
-        syncJobRepository.save(job);
+    private boolean isTransientError(Exception e) {
+        String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+        if (msg.contains("429") || msg.contains("too many requests")) return true;
+        if (msg.contains("502") || msg.contains("503") || msg.contains("504")) return true;
+        if (msg.contains("timeout") || msg.contains("connection refused")) return true;
+        return false;
     }
 
     private WbCardsRequestDto buildRequest(SyncType type, ShopWbIntegration integration) {
@@ -180,6 +208,10 @@ public class CatalogSyncService {
             mapper.updateProductCoreFields(product, card);
         } else {
             product = mapper.mapToNewProduct(shop, card);
+            if (product.getSeoSlug() == null || product.getSeoSlug().isEmpty()) {
+                String baseTitle = product.getLocalTitle() != null ? product.getLocalTitle() : product.getTitle();
+                product.setSeoSlug(slugService.makeUniqueSlug(baseTitle, card.getNmID().toString()));
+            }
             isNew = true;
         }
 

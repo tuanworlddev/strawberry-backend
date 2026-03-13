@@ -17,15 +17,14 @@ public class SyncMessageConsumer {
     private final ObjectMapper objectMapper;
 
     @RabbitListener(queues = com.strawberry.ecommerce.sync.config.RabbitMQConfig.QUEUE_SYNC_JOBS)
-    public void receiveSyncJobMessage(SyncJobMessage message) {
+    public void consume(SyncJobMessage message) {
+        log.info("Received SyncJobMessage from queue: JobId={}, ShopId={}, Type={}", 
+                message.getSyncJobId(), message.getShopId(), message.getSyncType());
+        
         try {
-            log.info("Received SyncJobMessage from queue: JobId={}, ShopId={}, Type={}", 
-                     message.getSyncJobId(), message.getShopId(), message.getSyncType());
-                     
-            catalogSyncService.processSyncJob(message.getSyncJobId());
-            
+            catalogSyncService.processSyncJob(message);
         } catch (Exception e) {
-            log.error("Failed to process sync job from queue message", e);
+            log.error("Error processing sync job message: {}", e.getMessage(), e);
             // In a production environment, we should dead-letter this or retry
             // For MVP Phase 2, we just log and drop from the queue because it's non-recoverable parsing error
         }

@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 import java.time.ZonedDateTime;
 import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
 @Table(name = "shops")
@@ -19,6 +20,7 @@ public class Shop {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "seller_profile_id", nullable = false)
+    @JsonIgnore
     private SellerProfile sellerProfile;
 
     @Column(nullable = false)

@@ -46,6 +46,21 @@ public class ShopWbIntegration {
     @Column(name = "last_error_message", columnDefinition = "TEXT")
     private String lastErrorMessage;
 
+    @Column(name = "sync_interval_minutes", nullable = false)
+    private Integer syncIntervalMinutes = 360;
+
+    @Column(name = "is_sync_paused", nullable = false)
+    private Boolean isSyncPaused = false;
+
+    @Column(name = "next_sync_expected_at")
+    private ZonedDateTime nextSyncExpectedAt;
+
+    @Column(name = "consecutive_failure_count", nullable = false)
+    private Integer consecutiveFailureCount = 0;
+
+    @Column(name = "last_sync_duration_ms")
+    private Long lastSyncDurationMs;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private ZonedDateTime createdAt;
 

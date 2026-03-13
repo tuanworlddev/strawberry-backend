@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -72,5 +73,19 @@ public class ShopService {
                 .slug(savedShop.getSlug())
                 .status(savedShop.getStatus().name())
                 .build();
+    }
+
+    public List<ShopResponseDto> getMyShops(UUID userId) {
+        SellerProfile sellerProfile = sellerProfileRepository.findByUserId(userId)
+                .orElseThrow(() -> new ApiException("Seller Profile not found", HttpStatus.NOT_FOUND));
+
+        return shopRepository.findBySellerProfileId(sellerProfile.getId()).stream()
+                .map(shop -> ShopResponseDto.builder()
+                        .shopId(shop.getId())
+                        .name(shop.getName())
+                        .slug(shop.getSlug())
+                        .status(shop.getStatus().name())
+                        .build())
+                .collect(java.util.stream.Collectors.toList());
     }
 }

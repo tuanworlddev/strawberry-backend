@@ -27,6 +27,10 @@ public class SyncJob {
     private SyncType syncType;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "trigger_type", nullable = false)
+    private TriggerType triggerType = TriggerType.MANUAL;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private SyncStatus status = SyncStatus.QUEUED;
 
@@ -50,6 +54,9 @@ public class SyncJob {
 
     @Column(name = "error_summary", columnDefinition = "TEXT")
     private String errorSummary;
+
+    @Column(name = "duration_ms")
+    private Long durationMs;
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private ZonedDateTime createdAt;
