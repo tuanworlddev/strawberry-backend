@@ -15,23 +15,36 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+import com.strawberry.ecommerce.shop.service.ShopOwnershipService;
+
 @RestController
-@RequestMapping("/api/v1/shops/{shopId}/integration")
+@RequestMapping("/api/v1/seller/shops/{shopId}")
 @RequiredArgsConstructor
 @Tag(name = "WB Integrations", description = "Endpoints to manage WB API Keys")
 public class WbIntegrationController {
 
     private final WbIntegrationService integrationService;
+    private final ShopOwnershipService shopOwnershipService;
 
-    @PutMapping
+    @GetMapping("/integration")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Get Wildberries Integration settings for a Shop")
+    public ResponseEntity<IntegrationResponseDto> getIntegration(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId) {
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        return ResponseEntity.ok(integrationService.getIntegration(shopId));
+    }
+
+    @PutMapping("/api-key")
     @PreAuthorize("hasRole('SELLER')")
     @Operation(summary = "Update Wildberries API Key for a Shop")
     public ResponseEntity<IntegrationResponseDto> updateIntegration(
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId,
             @Valid @RequestBody UpdateIntegrationRequest request) {
-
-        IntegrationResponseDto response = integrationService.updateIntegration(userDetails.getId(), shopId, request.getWbApiKey());
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        IntegrationResponseDto response = integrationService.updateIntegration(shopId, request.getWbApiKey());
         return ResponseEntity.ok(response);
     }
 }

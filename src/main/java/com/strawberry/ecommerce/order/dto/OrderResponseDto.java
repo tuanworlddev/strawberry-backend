@@ -23,6 +23,9 @@ public class OrderResponseDto {
     private String customerPhone;
     private String customerEmail;
     private String customerNote;
+    private BigDecimal shippingCost;
+    private String shippingMethodName;
+    private String shippingZoneName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private List<OrderItemResponseDto> items;

@@ -33,13 +33,31 @@ public class WbCatalogMapper {
 
     public void updateProductCoreFields(Product product, WbCardsResponseDto.Card card) {
         product.setWbNmId(card.getNmID());
+        product.setWbImtId(card.getImtID());
+        product.setWbNmUuid(card.getNmUUID());
         product.setBrand(card.getBrand());
-        product.setTitle(card.getTitle());
-        product.setDescription(card.getDescription());
-        product.setCategoryName(card.getSubjectName());
+        product.setWbTitle(card.getTitle());
+        product.setWbDescription(card.getDescription());
+        product.setWbCategoryName(card.getSubjectName());
         product.setWbVendorCode(card.getVendorCode());
-        product.setNeedKiz(card.getNeedKiz());
+        product.setWbNeedKiz(card.getNeedKiz());
         product.setSubjectId(card.getSubjectID());
+        product.setWbVideoUrl(card.getVideo());
+
+        // Wholesale
+        if (card.getWholesale() != null) {
+            product.setWholesaleEnabled(card.getWholesale().getEnabled());
+            product.setWholesaleQuantum(card.getWholesale().getQuantum());
+        }
+
+        // Dimensions
+        if (card.getDimensions() != null) {
+            product.setLength(card.getDimensions().getLength());
+            product.setWidth(card.getDimensions().getWidth());
+            product.setHeight(card.getDimensions().getHeight());
+            product.setWeightBrutto(card.getDimensions().getWeightBrutto());
+            product.setDimensionsValid(card.getDimensions().getIsValid());
+        }
 
         try {
             if (card.getCreatedAt() != null) {

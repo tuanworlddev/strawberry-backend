@@ -19,7 +19,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/customer/cart")
 @RequiredArgsConstructor
 @Tag(name = "Cart Controller", description = "Endpoints for customer cart management")
-@PreAuthorize("hasRole('CUSTOMER')")
+@PreAuthorize("hasRole('CUSTOMER') or hasRole('ADMIN') or hasRole('SELLER')")
 public class CartController {
 
     private final CartService cartService;

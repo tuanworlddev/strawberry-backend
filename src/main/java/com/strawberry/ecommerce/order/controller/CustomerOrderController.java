@@ -4,6 +4,8 @@ import com.strawberry.ecommerce.common.security.UserDetailsImpl;
 import com.strawberry.ecommerce.order.dto.CheckoutRequestDto;
 import com.strawberry.ecommerce.order.dto.OrderResponseDto;
 import com.strawberry.ecommerce.order.service.OrderService;
+import com.strawberry.ecommerce.shipping.dto.ShipmentResponseDto;
+import com.strawberry.ecommerce.shipping.service.CustomerTrackingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -27,6 +29,7 @@ import java.util.UUID;
 public class CustomerOrderController {
 
     private final OrderService orderService;
+    private final CustomerTrackingService trackingService;
 
     @PostMapping("/checkout")
     @Operation(summary = "Checkout entire cart and split into orders by shop")
@@ -64,5 +67,13 @@ public class CustomerOrderController {
         LocalDateTime transferTime = LocalDateTime.parse(transferTimeRaw);
         return ResponseEntity.ok(orderService.submitPaymentConfirmation(
                 userDetails.getId(), orderId, receiptImage, payerName, transferAmount, transferTime));
+    }
+
+    @GetMapping("/{orderId}/tracking")
+    @Operation(summary = "Get shipment tracking information for an order")
+    public ResponseEntity<ShipmentResponseDto> getTrackingInfo(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID orderId) {
+        return ResponseEntity.ok(trackingService.getTrackingInfo(userDetails.getId(), orderId));
     }
 }

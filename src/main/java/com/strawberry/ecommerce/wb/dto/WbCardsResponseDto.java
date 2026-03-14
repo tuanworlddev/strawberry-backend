@@ -27,6 +27,21 @@ public class WbCardsResponseDto {
         private Dimensions dimensions;
         private List<Characteristic> characteristics;
         private List<Size> sizes;
+        private List<Tag> tags;
+        private Wholesale wholesale;
+    }
+
+    @Data
+    public static class Tag {
+        private Long id;
+        private String name;
+        private String color;
+    }
+
+    @Data
+    public static class Wholesale {
+        private Boolean enabled;
+        private Integer quantum;
     }
 
     @Data

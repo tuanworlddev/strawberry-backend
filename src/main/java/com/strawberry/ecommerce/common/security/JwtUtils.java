@@ -33,6 +33,15 @@ public class JwtUtils {
                 .compact();
     }
 
+    public String generateJwtTokenFromUser(com.strawberry.ecommerce.user.entity.User user) {
+        return Jwts.builder()
+                .subject(user.getEmail())
+                .issuedAt(new Date())
+                .expiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(key())
+                .compact();
+    }
+
     private SecretKey key() {
         return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
     }

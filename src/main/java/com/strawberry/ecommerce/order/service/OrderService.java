@@ -16,6 +16,11 @@ import com.strawberry.ecommerce.order.entity.*;
 import com.strawberry.ecommerce.order.repository.OrderItemRepository;
 import com.strawberry.ecommerce.order.repository.OrderRepository;
 import com.strawberry.ecommerce.order.repository.PaymentConfirmationRepository;
+import com.strawberry.ecommerce.shipping.entity.ShippingMethod;
+import com.strawberry.ecommerce.shipping.entity.ShippingZone;
+import com.strawberry.ecommerce.shipping.repository.ShippingMethodRepository;
+import com.strawberry.ecommerce.shipping.repository.ShippingZoneRepository;
+import com.strawberry.ecommerce.shipping.service.ShippingRateService;
 import com.strawberry.ecommerce.shop.entity.Shop;
 import com.strawberry.ecommerce.user.entity.User;
 import com.strawberry.ecommerce.user.repository.UserRepository;
@@ -44,6 +49,9 @@ public class OrderService {
     private final UserRepository userRepository;
     private final PaymentConfirmationRepository paymentConfirmationRepository;
     private final CloudinaryService cloudinaryService;
+    private final ShippingRateService shippingRateService;
+    private final ShippingZoneRepository shippingZoneRepository;
+    private final ShippingMethodRepository shippingMethodRepository;
 
     @Transactional
     public List<OrderResponseDto> checkout(UUID customerId, CheckoutRequestDto req) {
@@ -56,6 +64,13 @@ public class OrderService {
 
         User customer = userRepository.findById(customerId)
                 .orElseThrow(() -> new ApiException("User not found", HttpStatus.NOT_FOUND));
+
+        ShippingZone shippingZone = shippingZoneRepository.findById(req.getShippingZoneId())
+                .orElseThrow(() -> new ApiException("Invalid shipping zone ID", HttpStatus.BAD_REQUEST));
+        ShippingMethod shippingMethod = shippingMethodRepository.findById(req.getShippingMethodId())
+                .orElseThrow(() -> new ApiException("Invalid shipping method ID", HttpStatus.BAD_REQUEST));
+        
+        BigDecimal shippingCostPerOrder = shippingRateService.calculateShippingCost(shippingZone.getId(), shippingMethod.getId());
 
         // Group cart items by shop
         Map<Shop, List<CartItem>> itemsByShop = cart.getItems().stream()
@@ -82,6 +97,10 @@ public class OrderService {
                     .customerPhone(req.getCustomerPhone())
                     .customerEmail(req.getCustomerEmail())
                     .customerNote(req.getCustomerNote())
+                    .shippingMethod(shippingMethod)
+                    .shippingZone(shippingZone)
+                    .shippingCost(shippingCostPerOrder)
+                    .shippingMethodName(shippingMethod.getName())
                     .totalAmount(BigDecimal.ZERO) // Will set later
                     .build();
 
@@ -94,10 +113,10 @@ public class OrderService {
                 // Re-validate stock
                 int availableStock = variant.getStockQuantity() - variant.getReservedStock();
                 if (cartItem.getQuantity() > availableStock) {
-                    throw new ApiException("Insufficient stock for product " + product.getTitle(), HttpStatus.BAD_REQUEST);
+                    throw new ApiException("Insufficient stock for product " + product.getWbTitle(), HttpStatus.BAD_REQUEST);
                 }
                 if (!"ACTIVE".equals(product.getVisibility()) || !Boolean.TRUE.equals(variant.getIsActive())) {
-                    throw new ApiException("Product " + product.getTitle() + " is no longer available", HttpStatus.BAD_REQUEST);
+                    throw new ApiException("Product " + product.getWbTitle() + " is no longer available", HttpStatus.BAD_REQUEST);
                 }
 
                 // Reserve Stock
@@ -108,7 +127,7 @@ public class OrderService {
                 BigDecimal price = variant.getDiscountPrice() != null ? variant.getDiscountPrice() : variant.getBasePrice();
                 totalAmount = totalAmount.add(price.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
 
-                String titleSnapshot = product.getLocalTitle() != null ? product.getLocalTitle() : product.getTitle();
+                String titleSnapshot = product.getLocalTitle() != null ? product.getLocalTitle() : product.getWbTitle();
                 String attributesSnapshot = String.format("Tech Size: %s, WB Size: %s", variant.getTechSize(), variant.getWbSize());
                 String imageSnapshot = product.getImages().isEmpty() ? null : product.getImages().get(0).getWbUrl();
 
@@ -127,7 +146,8 @@ public class OrderService {
                 orderItems.add(orderItem);
             }
 
-            order.setTotalAmount(totalAmount);
+            // Adjust total amount to include shipping cost
+            order.setTotalAmount(totalAmount.add(shippingCostPerOrder));
             orderItemRepository.saveAll(orderItems);
             order.setItems(orderItems);
             createdOrders.add(order);
@@ -205,6 +225,9 @@ public class OrderService {
                 .customerPhone(order.getCustomerPhone())
                 .customerEmail(order.getCustomerEmail())
                 .customerNote(order.getCustomerNote())
+                .shippingCost(order.getShippingCost())
+                .shippingMethodName(order.getShippingMethodName())
+                .shippingZoneName(order.getShippingZone() != null ? order.getShippingZone().getName() : null)
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .receiptImageUrl(receiptUrl)

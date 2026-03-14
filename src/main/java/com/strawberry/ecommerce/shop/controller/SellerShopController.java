@@ -12,17 +12,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/v1/shops")
+@RequestMapping("/api/v1/seller/shops")
 @RequiredArgsConstructor
-@Tag(name = "Shop Management", description = "Endpoints for Sellers to manage their shops")
-public class ShopController {
+@Tag(name = "Seller Shop Management", description = "Endpoints for sellers to manage their shops")
+public class SellerShopController {
 
     private final ShopService shopService;
 
@@ -32,16 +31,33 @@ public class ShopController {
     public ResponseEntity<ShopResponseDto> createShop(
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @Valid @RequestBody CreateShopRequest request) {
-        
-        ShopResponseDto response = shopService.createShop(userDetails.getId(), request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(shopService.createShop(userDetails.getId(), request));
     }
 
     @GetMapping
     @PreAuthorize("hasRole('SELLER')")
     @Operation(summary = "Get all shops for the authenticated seller")
-    public ResponseEntity<java.util.List<ShopResponseDto>> getMyShops(
+    public ResponseEntity<List<ShopResponseDto>> getMyShops(
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
         return ResponseEntity.ok(shopService.getMyShops(userDetails.getId()));
+    }
+
+    @GetMapping("/{shopId}")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Get detail of a specific shop")
+    public ResponseEntity<ShopResponseDto> getShopDetail(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId) {
+        return ResponseEntity.ok(shopService.getShopDetail(userDetails.getId(), shopId));
+    }
+
+    @PutMapping("/{shopId}")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Update shop settings")
+    public ResponseEntity<ShopResponseDto> updateShop(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId,
+            @Valid @RequestBody CreateShopRequest request) {
+        return ResponseEntity.ok(shopService.updateShop(userDetails.getId(), shopId, request));
     }
 }

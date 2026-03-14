@@ -38,13 +38,9 @@ public class SyncService {
     private final AuditService auditService;
 
     @Transactional
-    public SyncJobResponseDto triggerSync(UUID userId, UUID shopId, SyncJobRequestDto request) {
+    public SyncJobResponseDto triggerSync(UUID shopId, SyncJobRequestDto request) {
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new ApiException("Shop not found", HttpStatus.NOT_FOUND));
-
-        if (!shop.getSellerProfile().getUser().getId().equals(userId)) {
-            throw new ApiException("You do not have permission to trigger sync for this shop", HttpStatus.FORBIDDEN);
-        }
 
         return executeTriggerSync(shop, request);
     }
@@ -112,13 +108,9 @@ public class SyncService {
     }
 
     @Transactional
-    public void updateSyncSettings(UUID userId, UUID shopId, Integer intervalMinutes, Boolean isPaused) {
+    public void updateSyncSettings(UUID shopId, Integer intervalMinutes, Boolean isPaused) {
         ShopWbIntegration integration = integrationRepository.findByShopId(shopId)
                 .orElseThrow(() -> new ApiException("Integration not found", HttpStatus.NOT_FOUND));
-
-        if (!integration.getShop().getSellerProfile().getUser().getId().equals(userId)) {
-            throw new ApiException("Access denied", HttpStatus.FORBIDDEN);
-        }
 
         if (intervalMinutes != null) {
             if (intervalMinutes < 15 || intervalMinutes > 1440) {
@@ -135,13 +127,9 @@ public class SyncService {
     }
 
     @Transactional(readOnly = true)
-    public List<SyncHistoryDto> getSyncHistory(UUID userId, UUID shopId, int limit) {
+    public List<SyncHistoryDto> getSyncHistory(UUID shopId, int limit) {
         ShopWbIntegration integration = integrationRepository.findByShopId(shopId)
                 .orElseThrow(() -> new ApiException("Integration not found", HttpStatus.NOT_FOUND));
-
-        if (!integration.getShop().getSellerProfile().getUser().getId().equals(userId)) {
-            throw new ApiException("Access denied", HttpStatus.FORBIDDEN);
-        }
 
         return syncJobRepository.findByShopId(shopId, PageRequest.of(0, limit, Sort.by("startedAt").descending()))
                 .stream()
@@ -163,13 +151,9 @@ public class SyncService {
     }
 
     @Transactional(readOnly = true)
-    public SyncHealthDto getSyncHealth(UUID userId, UUID shopId) {
+    public SyncHealthDto getSyncHealth(UUID shopId) {
         ShopWbIntegration integration = integrationRepository.findByShopId(shopId)
                 .orElseThrow(() -> new ApiException("Integration not found", HttpStatus.NOT_FOUND));
-
-        if (!integration.getShop().getSellerProfile().getUser().getId().equals(userId)) {
-            throw new ApiException("Access denied", HttpStatus.FORBIDDEN);
-        }
 
         return SyncHealthDto.builder()
                 .lastSuccessfulSyncAt(integration.getLastSyncAt()) // Note: for MVP we use lastSyncAt as a base

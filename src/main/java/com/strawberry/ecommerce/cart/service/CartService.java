@@ -159,7 +159,7 @@ public class CartService {
                             .id(item.getId())
                             .variantId(v.getId())
                             .productId(p.getId())
-                            .productTitle(p.getLocalTitle() != null ? p.getLocalTitle() : p.getTitle())
+                            .productTitle(p.getLocalTitle() != null ? p.getLocalTitle() : p.getWbTitle())
                             .productSlug(p.getSeoSlug())
                             .shopName(p.getShop().getName())
                             .shopId(p.getShop().getId())

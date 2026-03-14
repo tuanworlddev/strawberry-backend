@@ -5,6 +5,7 @@ import com.strawberry.ecommerce.catalog.repository.ProductVariantRepository;
 import com.strawberry.ecommerce.common.exception.ApiException;
 import com.strawberry.ecommerce.order.dto.OrderItemResponseDto;
 import com.strawberry.ecommerce.order.dto.OrderResponseDto;
+import com.strawberry.ecommerce.order.dto.PaymentDetailResponseDto;
 import com.strawberry.ecommerce.order.entity.Order;
 import com.strawberry.ecommerce.order.entity.OrderStatus;
 import com.strawberry.ecommerce.order.entity.PaymentConfirmation;
@@ -35,13 +36,11 @@ public class SellerOrderService {
     private final ProductVariantRepository variantRepository;
 
     @Transactional(readOnly = true)
-    public List<OrderResponseDto> getShopOrders(UUID sellerId, OrderStatus status, PaymentStatus paymentStatus) {
-        Shop shop = shopRepository.findBySellerProfileUserId(sellerId)
-                .orElseThrow(() -> new ApiException("Shop not found", HttpStatus.NOT_FOUND));
+    public List<OrderResponseDto> getShopOrders(UUID shopId, OrderStatus status, PaymentStatus paymentStatus) {
 
         List<Order> orders = orderRepository.findAll((root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.equal(root.get("shop").get("id"), shop.getId()));
+            predicates.add(cb.equal(root.get("shop").get("id"), shopId));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -58,13 +57,28 @@ public class SellerOrderService {
     }
 
     @Transactional(readOnly = true)
-    public OrderResponseDto getOrderDetails(UUID sellerId, UUID orderId) {
-        return mapToResponse(getOrderForSeller(sellerId, orderId));
+    public OrderResponseDto getOrderDetails(UUID shopId, UUID orderId) {
+        return mapToResponse(getOrderForSeller(shopId, orderId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentDetailResponseDto> getDetailedPayments(UUID shopId) {
+        // Fetch all orders waiting for confirmation for this shop
+        List<Order> orders = orderRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("shop").get("id"), shopId));
+            predicates.add(cb.equal(root.get("paymentStatus"), PaymentStatus.WAITING_CONFIRMATION));
+            return cb.and(predicates.toArray(new Predicate[0]));
+        });
+
+        return orders.stream()
+                .map(this::mapToPaymentDetail)
+                .collect(Collectors.toList());
     }
 
     @Transactional
-    public OrderResponseDto approvePayment(UUID sellerId, UUID orderId) {
-        Order order = getOrderForSeller(sellerId, orderId);
+    public OrderResponseDto approvePayment(UUID shopId, UUID orderId) {
+        Order order = getOrderForSeller(shopId, orderId);
 
         if (order.getPaymentStatus() != PaymentStatus.WAITING_CONFIRMATION) {
             throw new ApiException("Order is not currently waiting for payment confirmation", HttpStatus.BAD_REQUEST);
@@ -82,8 +96,8 @@ public class SellerOrderService {
     }
 
     @Transactional
-    public OrderResponseDto rejectPayment(UUID sellerId, UUID orderId) {
-        Order order = getOrderForSeller(sellerId, orderId);
+    public OrderResponseDto rejectPayment(UUID shopId, UUID orderId) {
+        Order order = getOrderForSeller(shopId, orderId);
 
         if (order.getPaymentStatus() != PaymentStatus.WAITING_CONFIRMATION) {
             throw new ApiException("Order is not currently waiting for payment confirmation", HttpStatus.BAD_REQUEST);
@@ -101,8 +115,8 @@ public class SellerOrderService {
     }
 
     @Transactional
-    public OrderResponseDto updateFulfillmentStatus(UUID sellerId, UUID orderId, OrderStatus newStatus) {
-        Order order = getOrderForSeller(sellerId, orderId);
+    public OrderResponseDto updateFulfillmentStatus(UUID shopId, UUID orderId, OrderStatus newStatus) {
+        Order order = getOrderForSeller(shopId, orderId);
         OrderStatus currentStatus = order.getStatus();
 
         if (newStatus == OrderStatus.ASSEMBLING) {
@@ -154,12 +168,9 @@ public class SellerOrderService {
         return mapToResponse(orderRepository.save(order));
     }
 
-    private Order getOrderForSeller(UUID sellerId, UUID orderId) {
-        Shop shop = shopRepository.findBySellerProfileUserId(sellerId)
-                .orElseThrow(() -> new ApiException("Shop not found", HttpStatus.NOT_FOUND));
-
-        return orderRepository.findByIdAndShopId(orderId, shop.getId())
-                .orElseThrow(() -> new ApiException("Order not found or does not belong to your shop", HttpStatus.FORBIDDEN));
+    private Order getOrderForSeller(UUID shopId, UUID orderId) {
+        return orderRepository.findByIdAndShopId(orderId, shopId)
+                .orElseThrow(() -> new ApiException("Order not found or does not belong to this shop", HttpStatus.FORBIDDEN));
     }
 
     private OrderResponseDto mapToResponse(Order order) {
@@ -195,6 +206,24 @@ public class SellerOrderService {
                         .wbNmIdSnapshot(item.getWbNmIdSnapshot())
                         .build()
                 ).collect(Collectors.toList()))
+                .build();
+    }
+
+    private PaymentDetailResponseDto mapToPaymentDetail(Order order) {
+        PaymentConfirmation confirmation = paymentConfirmationRepository.findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
+                .orElse(null);
+
+        return PaymentDetailResponseDto.builder()
+                .orderId(order.getId())
+                .orderNumber(order.getOrderNumber())
+                .customerName(order.getCustomerName())
+                .paymentStatus(order.getPaymentStatus().name())
+                .transferAmount(confirmation != null ? confirmation.getTransferAmount() : null)
+                .transferTime(confirmation != null ? confirmation.getTransferTime() : null)
+                .receiptImageUrl(confirmation != null ? confirmation.getReceiptImageUrl() : null)
+                .submittedAt(confirmation != null ? confirmation.getSubmittedAt() : null)
+                .orderTotal(order.getTotalAmount())
+                .payerName(confirmation != null ? confirmation.getPayerName() : null)
                 .build();
     }
 }

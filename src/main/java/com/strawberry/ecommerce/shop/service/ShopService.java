@@ -38,11 +38,6 @@ public class ShopService {
             throw new ApiException("Shop slug is already taken", HttpStatus.BAD_REQUEST);
         }
 
-        // Just an MVP check: allow only 1 shop per seller profile
-        if (shopRepository.findBySellerProfileId(sellerProfile.getId()).isPresent()) {
-            throw new ApiException("Seller already has a shop", HttpStatus.BAD_REQUEST);
-        }
-
         Shop shop = new Shop();
         shop.setSellerProfile(sellerProfile);
         shop.setName(request.getName());
@@ -64,11 +59,10 @@ public class ShopService {
                 "Shop",
                 savedShop.getId().toString(),
                 null,
-                "{\"name\":\"" + savedShop.getName() + "\", \"slug\":\"" + savedShop.getSlug() + "\"}"
-        );
+                "{\"name\":\"" + savedShop.getName() + "\", \"slug\":\"" + savedShop.getSlug() + "\"}");
 
         return ShopResponseDto.builder()
-                .shopId(savedShop.getId())
+                .id(savedShop.getId())
                 .name(savedShop.getName())
                 .slug(savedShop.getSlug())
                 .status(savedShop.getStatus().name())
@@ -78,14 +72,57 @@ public class ShopService {
     public List<ShopResponseDto> getMyShops(UUID userId) {
         SellerProfile sellerProfile = sellerProfileRepository.findByUserId(userId)
                 .orElseThrow(() -> new ApiException("Seller Profile not found", HttpStatus.NOT_FOUND));
+        System.out.println(sellerProfile);
 
         return shopRepository.findBySellerProfileId(sellerProfile.getId()).stream()
-                .map(shop -> ShopResponseDto.builder()
-                        .shopId(shop.getId())
-                        .name(shop.getName())
-                        .slug(shop.getSlug())
-                        .status(shop.getStatus().name())
-                        .build())
+                .map(this::mapToDto)
                 .collect(java.util.stream.Collectors.toList());
+    }
+
+    public ShopResponseDto getShopDetail(UUID userId, UUID shopId) {
+        Shop shop = shopRepository.findByIdAndSellerProfileUserId(shopId, userId)
+                .orElseThrow(() -> new ApiException("Shop not found or access denied", HttpStatus.FORBIDDEN));
+        return mapToDto(shop);
+    }
+
+    @Transactional
+    public ShopResponseDto updateShop(UUID userId, UUID shopId, CreateShopRequest request) {
+        Shop shop = shopRepository.findByIdAndSellerProfileUserId(shopId, userId)
+                .orElseThrow(() -> new ApiException("Shop not found or access denied", HttpStatus.FORBIDDEN));
+
+        if (!shop.getSlug().equals(request.getSlug()) && shopRepository.existsBySlug(request.getSlug())) {
+            throw new ApiException("Shop slug is already taken", HttpStatus.BAD_REQUEST);
+        }
+
+        shop.setName(request.getName());
+        shop.setSlug(request.getSlug());
+        shop.setLogoUrl(request.getLogoUrl());
+        shop.setContactInfo(request.getContactInfo());
+        shop.setBankName(request.getBankName());
+        shop.setAccountNumber(request.getAccountNumber());
+        shop.setAccountHolderName(request.getAccountHolderName());
+        shop.setBik(request.getBik());
+        shop.setCorrespondentAccount(request.getCorrespondentAccount());
+        shop.setPaymentInstructions(request.getPaymentInstructions());
+
+        Shop saved = shopRepository.save(shop);
+        return mapToDto(saved);
+    }
+
+    private ShopResponseDto mapToDto(Shop shop) {
+        return ShopResponseDto.builder()
+                .id(shop.getId())
+                .name(shop.getName())
+                .slug(shop.getSlug())
+                .status(shop.getStatus().name())
+                .logo(shop.getLogoUrl())
+                .contactInfo(shop.getContactInfo())
+                .bankName(shop.getBankName())
+                .accountNumber(shop.getAccountNumber())
+                .accountHolderName(shop.getAccountHolderName())
+                .bik(shop.getBik())
+                .correspondentAccount(shop.getCorrespondentAccount())
+                .paymentInstructions(shop.getPaymentInstructions())
+                .build();
     }
 }

@@ -13,6 +13,10 @@ import java.util.UUID;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpecificationExecutor<Product> {
     Optional<Product> findByShopIdAndWbNmId(UUID shopId, Long wbNmId);
+    Optional<Product> findByWbNmId(Long wbNmId);
     Page<Product> findByShopId(UUID shopId, Pageable pageable);
     Optional<Product> findBySeoSlug(String slug);
+    long countByShopSlugAndVisibilityAndSeoSlugIsNotNull(String shopSlug, String visibility);
+    long countByShopId(UUID shopId);
 }
+

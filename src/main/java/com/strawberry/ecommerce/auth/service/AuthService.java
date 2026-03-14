@@ -44,7 +44,10 @@ public class AuthService {
                 .findFirst()
                 .orElse("ROLE_USER");
 
-        return new LoginResponse(jwt, "dummy-refresh-token", role);
+        User user = userRepository.findByEmail(loginRequest.getEmail())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        return new LoginResponse(jwt, "dummy-refresh-token", user.getEmail(), user.getFullName(), role);
     }
 
     @Transactional
@@ -55,8 +58,10 @@ public class AuthService {
 
         User user = new User();
         user.setEmail(request.getEmail());
+        user.setFullName(request.getFullName());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(Role.SELLER);
+        user.setStatus(com.strawberry.ecommerce.user.entity.UserStatus.ACTIVE);
         User savedUser = userRepository.save(user);
 
         SellerProfile sellerProfile = new SellerProfile();
@@ -64,9 +69,15 @@ public class AuthService {
         sellerProfile.setApprovalStatus("PENDING");
         sellerProfileRepository.save(sellerProfile);
 
+        // Generate token for auto-login if desired (not strictly required by backend flow but helpful for frontend)
+        String jwt = jwtUtils.generateJwtTokenFromUser(savedUser);
+
         return RegisterResponse.builder()
                 .userId(savedUser.getId())
+                .accessToken(jwt)
+                .refreshToken("dummy-refresh-token")
                 .email(savedUser.getEmail())
+                .fullName(savedUser.getFullName())
                 .role(savedUser.getRole().name())
                 .status(savedUser.getStatus().name())
                 .approvalStatus(sellerProfile.getApprovalStatus())
@@ -81,13 +92,21 @@ public class AuthService {
 
         User user = new User();
         user.setEmail(request.getEmail());
+        user.setFullName(request.getFullName());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(Role.CUSTOMER);
+        user.setStatus(com.strawberry.ecommerce.user.entity.UserStatus.ACTIVE);
         User savedUser = userRepository.save(user);
+
+        // Generate token for auto-login
+        String jwt = jwtUtils.generateJwtTokenFromUser(savedUser);
 
         return RegisterResponse.builder()
                 .userId(savedUser.getId())
+                .accessToken(jwt)
+                .refreshToken("dummy-refresh-token")
                 .email(savedUser.getEmail())
+                .fullName(savedUser.getFullName())
                 .role(savedUser.getRole().name())
                 .status(savedUser.getStatus().name())
                 .approvalStatus(null)

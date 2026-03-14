@@ -1,7 +1,10 @@
 package com.strawberry.ecommerce.order.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+
+import java.util.UUID;
 
 @Data
 public class CheckoutRequestDto {
@@ -17,4 +20,10 @@ public class CheckoutRequestDto {
     private String customerEmail;
     
     private String customerNote;
+
+    @NotNull(message = "Shipping method ID cannot be null")
+    private UUID shippingMethodId;
+
+    @NotNull(message = "Shipping zone ID cannot be null")
+    private UUID shippingZoneId;
 }

@@ -2,6 +2,7 @@ package com.strawberry.ecommerce.catalog.service;
 
 import com.strawberry.ecommerce.catalog.entity.*;
 import com.strawberry.ecommerce.catalog.mapper.WbCatalogMapper;
+import com.strawberry.ecommerce.catalog.repository.CategoryRepository;
 import com.strawberry.ecommerce.catalog.repository.ProductRepository;
 import com.strawberry.ecommerce.common.crypto.EncryptionUtils;
 import com.strawberry.ecommerce.shop.entity.Shop;
@@ -26,7 +27,6 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +35,7 @@ import java.util.stream.Collectors;
 public class CatalogSyncService {
 
     private final ProductRepository productRepository;
+    private final CategoryRepository categoryRepository;
 
     private final ShopWbIntegrationRepository integrationRepository;
     private final SyncJobRepository syncJobRepository;
@@ -209,10 +210,23 @@ public class CatalogSyncService {
         } else {
             product = mapper.mapToNewProduct(shop, card);
             if (product.getSeoSlug() == null || product.getSeoSlug().isEmpty()) {
-                String baseTitle = product.getLocalTitle() != null ? product.getLocalTitle() : product.getTitle();
+                String baseTitle = product.getLocalTitle() != null ? product.getLocalTitle() : product.getWbTitle();
                 product.setSeoSlug(slugService.makeUniqueSlug(baseTitle, card.getNmID().toString()));
             }
             isNew = true;
+        }
+
+        // Link Category
+        if (card.getSubjectID() != null) {
+            Category category = categoryRepository.findById(card.getSubjectID())
+                    .orElseGet(() -> {
+                        Category newCat = Category.builder()
+                                .id(card.getSubjectID())
+                                .name(card.getSubjectName() != null ? card.getSubjectName() : "Unknown")
+                                .build();
+                        return categoryRepository.save(newCat);
+                    });
+            product.setCategory(category);
         }
 
         // Reconciliation for Images
@@ -241,6 +255,19 @@ public class CatalogSyncService {
 
         // Safely Merge Variants
         mergeVariantsSafe(product, card.getSizes());
+
+        // Reconciliation for Tags
+        if (card.getTags() != null) {
+            product.getTags().clear(); // Simple for tags
+            product.getTags().addAll(card.getTags().stream()
+                    .map(t -> ProductTag.builder()
+                            .product(product)
+                            .wbTagId(t.getId())
+                            .name(t.getName())
+                            .color(t.getColor())
+                            .build())
+                    .collect(Collectors.toList()));
+        }
 
         productRepository.save(product);
         return isNew;

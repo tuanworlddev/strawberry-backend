@@ -5,7 +5,9 @@ import com.strawberry.ecommerce.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -39,11 +41,13 @@ public class Order {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Builder.Default
     private OrderStatus status = OrderStatus.NEW;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Builder.Default
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
 
@@ -63,6 +67,20 @@ public class Order {
 
     @Column(columnDefinition = "TEXT")
     private String customerNote;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipping_method_id")
+    private com.strawberry.ecommerce.shipping.entity.ShippingMethod shippingMethod;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipping_zone_id")
+    private com.strawberry.ecommerce.shipping.entity.ShippingZone shippingZone;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private BigDecimal shippingCost = BigDecimal.ZERO;
+
+    private String shippingMethodName;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

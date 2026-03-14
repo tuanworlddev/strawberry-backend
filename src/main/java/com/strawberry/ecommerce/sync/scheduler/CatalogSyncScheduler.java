@@ -23,7 +23,7 @@ public class CatalogSyncScheduler {
     private final ShopWbIntegrationRepository integrationRepository;
     private final SyncService syncService;
 
-    @Scheduled(fixedRateString = "${app.sync.scheduler-rate-ms:60000}")
+    @Scheduled(cron = "0 0 */2 * * *")
     public void scheduleIncrementalSyncs() {
         log.debug("Starting scheduled sync check...");
         ZonedDateTime now = ZonedDateTime.now();
@@ -31,13 +31,15 @@ public class CatalogSyncScheduler {
                 .findByIsActiveTrueAndIsSyncPausedFalseAndNextSyncExpectedAtBefore(now);
 
         for (ShopWbIntegration integration : pendingIntegrations) {
-            processIntegration(integration);
+            if (integration != null) {
+                processIntegration(integration);
+            }
         }
     }
 
     private void processIntegration(ShopWbIntegration integration) {
         String shopIdStr = integration.getShop().getId().toString();
-        
+
         // Attempt to acquire advisory lock
         boolean locked = integrationRepository.acquireAdvisoryLock(shopIdStr);
         if (!locked) {
@@ -47,7 +49,7 @@ public class CatalogSyncScheduler {
 
         try {
             log.info("Triggering scheduled INCREMENTAL sync for shop {}", shopIdStr);
-            
+
             SyncJobRequestDto request = new SyncJobRequestDto();
             request.setSyncType(SyncType.INCREMENTAL);
             request.setTriggerType(TriggerType.SCHEDULED);
@@ -57,7 +59,7 @@ public class CatalogSyncScheduler {
 
             // Update next sync time only after successful trigger
             updateNextSyncTime(integration);
-            
+
         } catch (Exception e) {
             log.error("Failed to trigger scheduled sync for shop {}: {}", shopIdStr, e.getMessage());
         } finally {

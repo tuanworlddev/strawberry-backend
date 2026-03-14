@@ -24,15 +24,19 @@ public class WbIntegrationService {
     private final EncryptionUtils encryptionUtils;
     private final AuditService auditService;
 
+    @Transactional(readOnly = true)
+    public IntegrationResponseDto getIntegration(UUID shopId) {
+        ShopWbIntegration integration = integrationRepository.findByShopId(shopId)
+                .orElseThrow(() -> new ApiException("Integration not found for this shop", HttpStatus.NOT_FOUND));
+
+        return mapToDto(integration);
+    }
+
     @Transactional
-    public IntegrationResponseDto updateIntegration(UUID userId, UUID shopId, String plainTextApiKey) {
+    public IntegrationResponseDto updateIntegration(UUID shopId, String plainTextApiKey) {
         
         Shop shop = shopRepository.findById(shopId)
                 .orElseThrow(() -> new ApiException("Shop not found", HttpStatus.NOT_FOUND));
-
-        if (!shop.getSellerProfile().getUser().getId().equals(userId)) {
-            throw new ApiException("You do not have permission to modify this shop's integration", HttpStatus.FORBIDDEN);
-        }
 
         String encryptedKey = encryptionUtils.encrypt(plainTextApiKey);
 
@@ -55,11 +59,15 @@ public class WbIntegrationService {
                 "{\"shopId\":\"" + shop.getId() + "\"}"
         );
 
+        return mapToDto(savedIntegration);
+    }
+
+    private IntegrationResponseDto mapToDto(ShopWbIntegration integration) {
         return IntegrationResponseDto.builder()
-                .integrationId(savedIntegration.getId())
-                .shopId(shop.getId())
-                .isActive(savedIntegration.getIsActive())
-                .updatedAt(savedIntegration.getUpdatedAt())
+                .integrationId(integration.getId())
+                .shopId(integration.getShop().getId())
+                .isActive(integration.getIsActive())
+                .updatedAt(integration.getUpdatedAt())
                 .build();
     }
 }

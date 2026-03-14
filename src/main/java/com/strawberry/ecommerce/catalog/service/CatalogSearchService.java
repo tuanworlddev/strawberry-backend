@@ -33,7 +33,8 @@ public class CatalogSearchService {
     public Page<ProductResponseDto> search(
             String query,
             UUID shopId,
-            String category,
+            String shopSlug,
+            String categoryId,
             String brand,
             BigDecimal minPrice,
             BigDecimal maxPrice,
@@ -55,19 +56,49 @@ public class CatalogSearchService {
             // 2. Filters
             if (query != null && !query.isEmpty()) {
                 String lq = "%" + query.toLowerCase() + "%";
-                predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("localTitle")), lq),
-                        cb.like(cb.lower(root.get("title")), lq),
-                        cb.like(cb.lower(root.get("brand")), lq)
-                ));
+                if (query.matches("\\d+")) {
+                    // If numeric, also search by wbNmId
+                    try {
+                        Long nmId = Long.parseLong(query);
+                        predicates.add(cb.or(
+                                cb.like(cb.lower(root.get("localTitle")), lq),
+                                cb.like(cb.lower(root.get("wbTitle")), lq),
+                                cb.like(cb.lower(root.get("brand")), lq),
+                                cb.like(cb.lower(root.get("wbVendorCode")), lq),
+                                cb.equal(root.get("wbNmId"), nmId)
+                        ));
+                    } catch (NumberFormatException e) {
+                        predicates.add(cb.or(
+                                cb.like(cb.lower(root.get("localTitle")), lq),
+                                cb.like(cb.lower(root.get("wbTitle")), lq),
+                                cb.like(cb.lower(root.get("brand")), lq),
+                                cb.like(cb.lower(root.get("wbVendorCode")), lq)
+                        ));
+                    }
+                } else {
+                    predicates.add(cb.or(
+                            cb.like(cb.lower(root.get("localTitle")), lq),
+                            cb.like(cb.lower(root.get("wbTitle")), lq),
+                            cb.like(cb.lower(root.get("brand")), lq),
+                            cb.like(cb.lower(root.get("wbVendorCode")), lq)
+                    ));
+                }
             }
 
             if (shopId != null) {
                 predicates.add(cb.equal(root.get("shop").get("id"), shopId));
+            } else if (shopSlug != null) {
+                predicates.add(cb.equal(root.get("shop").get("slug"), shopSlug));
             }
 
-            if (category != null) {
-                predicates.add(cb.equal(root.get("categoryName"), category));
+            if (categoryId != null && !categoryId.isEmpty()) {
+                try {
+                    Long cid = Long.parseLong(categoryId);
+                    predicates.add(cb.equal(root.get("category").get("id"), cid));
+                } catch (NumberFormatException e) {
+                    // fallback to string match if they pass category name by accident
+                    predicates.add(cb.equal(root.get("wbCategoryName"), categoryId));
+                }
             }
 
             if (brand != null) {
@@ -112,7 +143,7 @@ public class CatalogSearchService {
         
         List<String> categories = products.stream()
                 .filter(p -> "ACTIVE".equals(p.getVisibility()) && p.getSeoSlug() != null && !p.getVariants().isEmpty())
-                .map(Product::getCategoryName)
+                .map(p -> p.getCategory() != null ? p.getCategory().getName() : p.getWbCategoryName())
                 .filter(c -> c != null && !c.isEmpty())
                 .distinct()
                 .sorted()
@@ -132,12 +163,31 @@ public class CatalogSearchService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    public ProductDetailResponseDto getProductByWbId(Long nmId) {
+        Product product = productRepository.findByWbNmId(nmId)
+                .orElseThrow(() -> new ApiException("Product not found", HttpStatus.NOT_FOUND));
+
+        if (!"ACTIVE".equals(product.getVisibility())) {
+             throw new ApiException("Product not found", HttpStatus.NOT_FOUND);
+        }
+
+        return mapToDetailResponse(product);
+    }
+
     private ProductResponseDto mapToResponse(Product p) {
         BigDecimal minPrice = p.getVariants().stream()
                 .filter(ProductVariant::getIsActive)
                 .map(v -> v.getDiscountPrice() != null ? v.getDiscountPrice() : v.getBasePrice())
                 .min(BigDecimal::compareTo)
                 .orElse(BigDecimal.ZERO);
+                
+        BigDecimal discountPrice = p.getVariants().stream()
+                .filter(ProductVariant::getIsActive)
+                .filter(v -> v.getDiscountPrice() != null)
+                .map(ProductVariant::getDiscountPrice)
+                .min(BigDecimal::compareTo)
+                .orElse(null);
 
         boolean inStock = p.getVariants().stream()
                 .filter(ProductVariant::getIsActive)
@@ -148,13 +198,18 @@ public class CatalogSearchService {
         return ProductResponseDto.builder()
                 .id(p.getId())
                 .slug(p.getSeoSlug())
-                .title(p.getLocalTitle() != null ? p.getLocalTitle() : p.getTitle())
+                .title(p.getLocalTitle() != null ? p.getLocalTitle() : p.getWbTitle())
                 .brand(p.getBrand())
                 .mainImage(mainImg)
+                .minPrice(minPrice)
+                .discountPrice(discountPrice)
+                .inStock(inStock)
                 .shopName(p.getShop().getName())
                 .shopSlug(p.getShop().getSlug())
-                .minPrice(minPrice)
-                .inStock(inStock)
+                .categoryId(p.getCategory() != null ? p.getCategory().getId() : null)
+                .categoryName(p.getCategory() != null ? p.getCategory().getName() : p.getWbCategoryName())
+                .wbNmId(p.getWbNmId())
+                .vendorCode(p.getWbVendorCode())
                 .build();
     }
 
@@ -162,10 +217,13 @@ public class CatalogSearchService {
         return ProductDetailResponseDto.builder()
                 .id(p.getId())
                 .slug(p.getSeoSlug())
-                .title(p.getLocalTitle() != null ? p.getLocalTitle() : p.getTitle())
-                .description(p.getLocalDescription() != null ? p.getLocalDescription() : p.getDescription())
+                .title(p.getLocalTitle() != null ? p.getLocalTitle() : p.getWbTitle())
+                .description(p.getLocalDescription() != null ? p.getLocalDescription() : p.getWbDescription())
                 .brand(p.getBrand())
-                .categoryName(p.getCategoryName())
+                .category(p.getCategory() != null ? ProductDetailResponseDto.CategoryDto.builder()
+                        .id(p.getCategory().getId())
+                        .name(p.getCategory().getName())
+                        .build() : null)
                 .images(p.getImages().stream().map(img -> img.getWbUrl()).collect(Collectors.toList()))
                 .characteristics(p.getCharacteristics().stream()
                         .map(c -> ProductDetailResponseDto.CharacteristicDto.builder()
@@ -190,6 +248,9 @@ public class CatalogSearchService {
                         .name(p.getShop().getName())
                         .slug(p.getShop().getSlug())
                         .build())
+                .averageRate(p.getAverageRating())
+                .reviewCount(p.getFeedbackCount())
+                .wbNmId(p.getWbNmId())
                 .build();
     }
 }

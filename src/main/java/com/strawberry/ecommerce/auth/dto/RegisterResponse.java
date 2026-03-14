@@ -13,7 +13,10 @@ import java.util.UUID;
 @Builder
 public class RegisterResponse {
     private UUID userId;
+    private String accessToken;
+    private String refreshToken;
     private String email;
+    private String fullName;
     private String role;
     private String status;
     private String approvalStatus;

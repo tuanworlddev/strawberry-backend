@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
+import com.strawberry.ecommerce.shop.service.ShopOwnershipService;
+
 @RestController
 @RequestMapping("/api/v1/seller/shops/{shopId}/sync")
 @RequiredArgsConstructor
@@ -22,6 +24,7 @@ import java.util.UUID;
 public class SyncController {
 
     private final SyncService syncService;
+    private final ShopOwnershipService shopOwnershipService;
 
     @PostMapping("/full")
     @PreAuthorize("hasRole('SELLER')")
@@ -30,9 +33,10 @@ public class SyncController {
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId) {
 
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
         SyncJobRequestDto request = new SyncJobRequestDto();
         request.setSyncType(com.strawberry.ecommerce.sync.entity.SyncType.FULL);
-        SyncJobResponseDto response = syncService.triggerSync(userDetails.getId(), shopId, request);
+        SyncJobResponseDto response = syncService.triggerSync(shopId, request);
         return ResponseEntity.accepted().body(response);
     }
 
@@ -43,12 +47,11 @@ public class SyncController {
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId,
             @RequestBody @Valid SyncJobRequestDto request) {
-        // The request object might already have the type set if coming from a specific client,
-        // but we ensure it's incremental if not explicitly set or if we want to override.
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
         if (request.getSyncType() == null) {
             request.setSyncType(com.strawberry.ecommerce.sync.entity.SyncType.INCREMENTAL);
         }
-        return ResponseEntity.ok(syncService.triggerSync(userDetails.getId(), shopId, request));
+        return ResponseEntity.ok(syncService.triggerSync(shopId, request));
     }
 
     @PutMapping("/settings")
@@ -58,7 +61,8 @@ public class SyncController {
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId,
             @RequestBody @Valid SyncSettingsRequestDto request) {
-        syncService.updateSyncSettings(userDetails.getId(), shopId, request.getSyncIntervalMinutes(), request.getIsSyncPaused());
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        syncService.updateSyncSettings(shopId, request.getSyncIntervalMinutes(), request.getIsSyncPaused());
         return ResponseEntity.noContent().build();
     }
 
@@ -69,7 +73,8 @@ public class SyncController {
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId,
             @RequestParam(defaultValue = "10") int limit) {
-        return ResponseEntity.ok(syncService.getSyncHistory(userDetails.getId(), shopId, limit));
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        return ResponseEntity.ok(syncService.getSyncHistory(shopId, limit));
     }
 
     @GetMapping("/stats")
@@ -78,6 +83,7 @@ public class SyncController {
     public ResponseEntity<SyncHealthDto> getSyncHealth(
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID shopId) {
-        return ResponseEntity.ok(syncService.getSyncHealth(userDetails.getId(), shopId));
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        return ResponseEntity.ok(syncService.getSyncHealth(shopId));
     }
 }
