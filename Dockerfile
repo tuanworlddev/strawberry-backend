@@ -12,7 +12,11 @@ RUN ./mvnw -B -DskipTests package
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 
-RUN mkdir -p /app && useradd --create-home --shell /bin/bash spring
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app \
+    && useradd --create-home --shell /bin/bash spring
 
 COPY --from=build /workspace/target/*.jar app.jar
 

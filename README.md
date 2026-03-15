@@ -230,6 +230,9 @@ For a full local stack, prefer Docker Compose from the repository root.
 - **Flyway migration failures**
   Check the migration order under `src/main/resources/db/migration` and confirm the target database is the expected one.
 
+- **Bootstrap or seed logic runs before the schema exists**
+  Startup bootstrap code must not assume tables are available before Flyway completes. In this project, `DataBootstrap` is guarded to skip safely until database initialization has finished.
+
 - **Cloudinary upload errors**
   Set `CLOUDINARY_URL`. Upload features intentionally fail fast when Cloudinary is not configured.
 

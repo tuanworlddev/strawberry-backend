@@ -12,6 +12,8 @@ import com.strawberry.ecommerce.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +22,7 @@ import java.util.Optional;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@DependsOnDatabaseInitialization
 public class DataBootstrap implements CommandLineRunner {
 
     private final UserRepository userRepository;
@@ -29,6 +32,11 @@ public class DataBootstrap implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        if (!isSchemaReady()) {
+            log.warn("Skipping data bootstrap because the database schema is not initialized yet.");
+            return;
+        }
+
         String adminEmail = "admin@gmail.com";
         Optional<User> adminOptional = userRepository.findByEmail(adminEmail);
 
@@ -138,6 +146,18 @@ public class DataBootstrap implements CommandLineRunner {
                 shopB.setStatus(ShopStatus.ACTIVE);
                 shopRepository.save(shopB);
             }
+        }
+    }
+
+    private boolean isSchemaReady() {
+        try {
+            userRepository.findByEmail("__bootstrap_schema_check__");
+            return true;
+        } catch (DataAccessException ex) {
+            log.warn("Database schema is not ready for data bootstrap: {}", ex.getMostSpecificCause() != null
+                    ? ex.getMostSpecificCause().getMessage()
+                    : ex.getMessage());
+            return false;
         }
     }
 }
