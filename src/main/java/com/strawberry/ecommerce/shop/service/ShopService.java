@@ -7,6 +7,9 @@ import com.strawberry.ecommerce.shop.dto.ShopResponseDto;
 import com.strawberry.ecommerce.shop.entity.Shop;
 import com.strawberry.ecommerce.shop.entity.ShopStatus;
 import com.strawberry.ecommerce.shop.repository.ShopRepository;
+import com.strawberry.ecommerce.catalog.repository.ProductRepository;
+import com.strawberry.ecommerce.order.entity.OrderStatus;
+import com.strawberry.ecommerce.order.repository.OrderRepository;
 import com.strawberry.ecommerce.seller.entity.SellerProfile;
 import com.strawberry.ecommerce.seller.repository.SellerProfileRepository;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +27,8 @@ public class ShopService {
     private final ShopRepository shopRepository;
     private final SellerProfileRepository sellerProfileRepository;
     private final AuditService auditService;
+    private final ProductRepository productRepository;
+    private final OrderRepository orderRepository;
 
     @Transactional
     public ShopResponseDto createShop(UUID userId, CreateShopRequest request) {
@@ -50,9 +55,11 @@ public class ShopService {
         shop.setBik(request.getBik());
         shop.setCorrespondentAccount(request.getCorrespondentAccount());
         shop.setPaymentInstructions(request.getPaymentInstructions());
-        shop.setStatus(ShopStatus.DRAFT);
+        shop.setStatus(ShopStatus.ACTIVE);
 
         Shop savedShop = shopRepository.save(shop);
+        sellerProfile.setCurrentShopId(savedShop.getId());
+        sellerProfileRepository.save(sellerProfile);
 
         auditService.logAction(
                 "SHOP_CREATED",
@@ -109,7 +116,11 @@ public class ShopService {
         return mapToDto(saved);
     }
 
-    private ShopResponseDto mapToDto(Shop shop) {
+    public ShopResponseDto toResponseDto(Shop shop) {
+        long productCount = productRepository.countByShopId(shop.getId());
+        long newOrderCount = orderRepository.countByShopIdAndStatusIn(shop.getId(), java.util.List.of(OrderStatus.NEW));
+        long deliveredOrderCount = orderRepository.countByShopIdAndStatusIn(shop.getId(), java.util.List.of(OrderStatus.DELIVERED));
+
         return ShopResponseDto.builder()
                 .id(shop.getId())
                 .name(shop.getName())
@@ -123,6 +134,13 @@ public class ShopService {
                 .bik(shop.getBik())
                 .correspondentAccount(shop.getCorrespondentAccount())
                 .paymentInstructions(shop.getPaymentInstructions())
+                .productCount(productCount)
+                .newOrderCount(newOrderCount)
+                .deliveredOrderCount(deliveredOrderCount)
                 .build();
+    }
+
+    private ShopResponseDto mapToDto(Shop shop) {
+        return toResponseDto(shop);
     }
 }

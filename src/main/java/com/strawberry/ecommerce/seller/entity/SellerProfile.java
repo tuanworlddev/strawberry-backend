@@ -33,6 +33,9 @@ public class SellerProfile {
     @Column(name = "review_note")
     private String reviewNote;
 
+    @Column(name = "current_shop_id")
+    private UUID currentShopId;
+
     @Column(name = "reviewed_at")
     private LocalDateTime reviewedAt;
 

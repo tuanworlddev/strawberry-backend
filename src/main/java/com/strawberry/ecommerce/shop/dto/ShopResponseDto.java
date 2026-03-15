@@ -26,5 +26,7 @@ public class ShopResponseDto {
     private String correspondentAccount;
     private String paymentInstructions;
     private Long productCount;
+    private Long newOrderCount;
+    private Long deliveredOrderCount;
     private String status;
 }
