@@ -2,6 +2,7 @@ package com.strawberry.ecommerce.catalog.controller;
 
 import com.strawberry.ecommerce.catalog.dto.VariantInventoryBulkUpdateRequestDto;
 import com.strawberry.ecommerce.catalog.dto.VariantInventoryResponseDto;
+import com.strawberry.ecommerce.catalog.dto.VariantPricingBulkUpdateRequestDto;
 import com.strawberry.ecommerce.catalog.service.CatalogService;
 import com.strawberry.ecommerce.common.security.UserDetailsImpl;
 import com.strawberry.ecommerce.shop.service.ShopOwnershipService;
@@ -51,6 +52,18 @@ public class CatalogVariantSellerController {
             @RequestBody VariantInventoryBulkUpdateRequestDto request) {
         shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
         catalogService.bulkUpdateVariantInventory(shopId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/bulk-pricing")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Bulk update multiple variant prices")
+    public ResponseEntity<Void> bulkUpdatePricing(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId,
+            @RequestBody VariantPricingBulkUpdateRequestDto request) {
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        catalogService.bulkUpdateVariantPricing(shopId, request);
         return ResponseEntity.noContent().build();
     }
 }
