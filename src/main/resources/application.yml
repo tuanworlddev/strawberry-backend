@@ -2,9 +2,9 @@ spring:
   application:
     name: strawberry-backend
   datasource:
-    url: jdbc:postgresql://localhost:5432/strawberry_db
-    username: strawberry_user
-    password: strawberry_password
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/strawberry_db}
+    username: ${SPRING_DATASOURCE_USERNAME:strawberry_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:strawberry_password}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
@@ -15,14 +15,17 @@ spring:
         format_sql: true
     show-sql: true
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: strawberry_mq
-    password: strawberry_mq_password
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:strawberry_mq}
+    password: ${SPRING_RABBITMQ_PASSWORD:strawberry_mq_password}
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:8080}
 
 springdoc:
   api-docs:
@@ -31,8 +34,26 @@ springdoc:
     path: /swagger-ui.html
 
 jwt:
-  secret: VmVyeVNlY3JldEtleUZvckpXVFNpZ25hdHVyZVN0cmF3YmVycnlFY29tbWVyY2VQbGF0Zm9ybTIwMjY=
-  expiration: 86400000
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    rabbit:
+      enabled: true
+
+info:
+  app:
+    name: Strawberry E-Commerce
+    service: backend
 
 logging:
   level:
@@ -45,4 +66,4 @@ logging:
 
 
 cloudinary:
-  url: ${CLOUDINARY_URL:cloudinary://757756855785918:8sHbfy31VUhMcQZAzv2kHIgdfSs@doavuniwt}
+  url: ${CLOUDINARY_URL:}
