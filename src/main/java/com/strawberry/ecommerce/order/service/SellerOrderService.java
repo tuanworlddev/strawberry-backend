@@ -1,6 +1,8 @@
 package com.strawberry.ecommerce.order.service;
 
 import com.strawberry.ecommerce.catalog.entity.ProductVariant;
+import com.strawberry.ecommerce.catalog.entity.Review;
+import com.strawberry.ecommerce.catalog.repository.ReviewRepository;
 import com.strawberry.ecommerce.catalog.repository.ProductVariantRepository;
 import com.strawberry.ecommerce.common.exception.ApiException;
 import com.strawberry.ecommerce.order.dto.OrderItemResponseDto;
@@ -12,17 +14,23 @@ import com.strawberry.ecommerce.order.entity.PaymentConfirmation;
 import com.strawberry.ecommerce.order.entity.PaymentStatus;
 import com.strawberry.ecommerce.order.repository.OrderRepository;
 import com.strawberry.ecommerce.order.repository.PaymentConfirmationRepository;
-import com.strawberry.ecommerce.shop.entity.Shop;
-import com.strawberry.ecommerce.shop.repository.ShopRepository;
+import com.strawberry.ecommerce.shipping.service.DeliveryIssueService;
+import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -31,9 +39,10 @@ import java.util.stream.Collectors;
 public class SellerOrderService {
 
     private final OrderRepository orderRepository;
-    private final ShopRepository shopRepository;
     private final PaymentConfirmationRepository paymentConfirmationRepository;
     private final ProductVariantRepository variantRepository;
+    private final ReviewRepository reviewRepository;
+    private final DeliveryIssueService deliveryIssueService;
 
     @Transactional(readOnly = true)
     public List<OrderResponseDto> getShopOrders(UUID shopId, OrderStatus status, PaymentStatus paymentStatus) {
@@ -62,18 +71,65 @@ public class SellerOrderService {
     }
 
     @Transactional(readOnly = true)
-    public List<PaymentDetailResponseDto> getDetailedPayments(UUID shopId) {
-        // Fetch all orders waiting for confirmation for this shop
-        List<Order> orders = orderRepository.findAll((root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.equal(root.get("shop").get("id"), shopId));
-            predicates.add(cb.equal(root.get("paymentStatus"), PaymentStatus.WAITING_CONFIRMATION));
-            return cb.and(predicates.toArray(new Predicate[0]));
-        });
+    public Page<PaymentDetailResponseDto> getDetailedPayments(UUID shopId, int page, int size, String search,
+            PaymentStatus status, LocalDate fromDate, LocalDate toDate) {
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.max(size, 1));
 
-        return orders.stream()
-                .map(this::mapToPaymentDetail)
-                .collect(Collectors.toList());
+        Page<Order> orders = orderRepository.findAll((root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            Join<Order, PaymentConfirmation> latestConfirmation = root.join("paymentConfirmations");
+            Subquery<LocalDateTime> latestSubmittedAtSubquery = query.subquery(LocalDateTime.class);
+            var subRoot = latestSubmittedAtSubquery.from(Order.class);
+            var subConfirmation = subRoot.join("paymentConfirmations");
+            latestSubmittedAtSubquery.select(cb.greatest(subConfirmation.<LocalDateTime>get("submittedAt")))
+                    .where(cb.equal(subRoot.get("id"), root.get("id")));
+
+            predicates.add(cb.equal(root.get("shop").get("id"), shopId));
+            predicates.add(cb.equal(latestConfirmation.get("submittedAt"), latestSubmittedAtSubquery));
+
+            List<PaymentStatus> visibleStatuses = List.of(
+                    PaymentStatus.WAITING_CONFIRMATION,
+                    PaymentStatus.APPROVED,
+                    PaymentStatus.REJECTED,
+                    PaymentStatus.REFUNDED);
+
+            if (status != null) {
+                predicates.add(cb.equal(root.get("paymentStatus"), status));
+            } else {
+                predicates.add(root.get("paymentStatus").in(visibleStatuses));
+            }
+
+            if (search != null && !search.isBlank()) {
+                String like = "%" + search.toLowerCase(Locale.ROOT) + "%";
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("customerName")), like),
+                        cb.like(cb.lower(root.get("customerEmail")), like),
+                        cb.like(cb.lower(root.get("customerPhone")), like),
+                        cb.like(cb.lower(root.get("orderNumber")), like)));
+            }
+
+            LocalDateTime fromDateTime = fromDate != null ? fromDate.atStartOfDay() : null;
+            LocalDateTime toDateTime = toDate != null ? toDate.plusDays(1).atStartOfDay() : null;
+            if (fromDateTime != null) {
+                predicates.add(cb.greaterThanOrEqualTo(latestConfirmation.get("submittedAt"), fromDateTime));
+            }
+            if (toDateTime != null) {
+                predicates.add(cb.lessThan(latestConfirmation.get("submittedAt"), toDateTime));
+            }
+
+            query.orderBy(
+                    cb.asc(cb.selectCase(root.get("paymentStatus"))
+                            .when(PaymentStatus.WAITING_CONFIRMATION, 0)
+                            .when(PaymentStatus.APPROVED, 1)
+                            .when(PaymentStatus.REJECTED, 2)
+                            .when(PaymentStatus.REFUNDED, 3)
+                            .otherwise(4)),
+                    cb.desc(latestConfirmation.get("submittedAt")));
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        }, pageable);
+
+        return orders.map(this::mapToPaymentDetail);
     }
 
     @Transactional
@@ -89,6 +145,7 @@ public class SellerOrderService {
         paymentConfirmationRepository.findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
                 .ifPresent(confirmation -> {
                     confirmation.setReviewedAt(LocalDateTime.now());
+                    confirmation.setReviewNote(null);
                     paymentConfirmationRepository.save(confirmation);
                 });
 
@@ -96,7 +153,7 @@ public class SellerOrderService {
     }
 
     @Transactional
-    public OrderResponseDto rejectPayment(UUID shopId, UUID orderId) {
+    public OrderResponseDto rejectPayment(UUID shopId, UUID orderId, String reason) {
         Order order = getOrderForSeller(shopId, orderId);
 
         if (order.getPaymentStatus() != PaymentStatus.WAITING_CONFIRMATION) {
@@ -108,6 +165,7 @@ public class SellerOrderService {
         paymentConfirmationRepository.findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
                 .ifPresent(confirmation -> {
                     confirmation.setReviewedAt(LocalDateTime.now());
+                    confirmation.setReviewNote(reason);
                     paymentConfirmationRepository.save(confirmation);
                 });
 
@@ -174,8 +232,8 @@ public class SellerOrderService {
     }
 
     private OrderResponseDto mapToResponse(Order order) {
-        String receiptUrl = paymentConfirmationRepository.findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
-                .map(PaymentConfirmation::getReceiptImageUrl)
+        PaymentConfirmation latestConfirmation = paymentConfirmationRepository
+                .findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
                 .orElse(null);
 
         return OrderResponseDto.builder()
@@ -193,7 +251,16 @@ public class SellerOrderService {
                 .customerNote(order.getCustomerNote())
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
-                .receiptImageUrl(receiptUrl)
+                .receiptImageUrl(latestConfirmation != null ? latestConfirmation.getReceiptImageUrl() : null)
+                .payerName(latestConfirmation != null ? latestConfirmation.getPayerName() : null)
+                .transferAmount(latestConfirmation != null ? latestConfirmation.getTransferAmount() : null)
+                .transferTime(latestConfirmation != null ? latestConfirmation.getTransferTime() : null)
+                .paymentSubmittedAt(latestConfirmation != null ? latestConfirmation.getSubmittedAt() : null)
+                .paymentReviewedAt(latestConfirmation != null ? latestConfirmation.getReviewedAt() : null)
+                .paymentReviewNote(latestConfirmation != null ? latestConfirmation.getReviewNote() : null)
+                .shopPaymentInstructions(order.getShop().getPaymentInstructions())
+                .customerCompletedAt(order.getCustomerCompletedAt())
+                .deliveryIssue(deliveryIssueService.getLatestForOrder(order.getId()))
                 .items(order.getItems().stream().map(item -> OrderItemResponseDto.builder()
                         .id(item.getId())
                         .variantId(item.getVariant() != null ? item.getVariant().getId() : null)
@@ -204,6 +271,10 @@ public class SellerOrderService {
                         .variantAttributesSnapshot(item.getVariantAttributesSnapshot())
                         .productImageSnapshot(item.getProductImageSnapshot())
                         .wbNmIdSnapshot(item.getWbNmIdSnapshot())
+                        .reviewId(reviewRepository.findByOrderItemId(item.getId()).map(Review::getId).orElse(null))
+                        .reviewRate(reviewRepository.findByOrderItemId(item.getId()).map(Review::getRate).orElse(null))
+                        .reviewContent(reviewRepository.findByOrderItemId(item.getId()).map(Review::getContent).orElse(null))
+                        .reviewCreatedAt(reviewRepository.findByOrderItemId(item.getId()).map(Review::getCreatedAt).orElse(null))
                         .build()
                 ).collect(Collectors.toList()))
                 .build();
@@ -216,14 +287,19 @@ public class SellerOrderService {
         return PaymentDetailResponseDto.builder()
                 .orderId(order.getId())
                 .orderNumber(order.getOrderNumber())
+                .orderCreatedAt(order.getCreatedAt())
                 .customerName(order.getCustomerName())
+                .customerEmail(order.getCustomerEmail())
+                .customerPhone(order.getCustomerPhone())
                 .paymentStatus(order.getPaymentStatus().name())
                 .transferAmount(confirmation != null ? confirmation.getTransferAmount() : null)
                 .transferTime(confirmation != null ? confirmation.getTransferTime() : null)
                 .receiptImageUrl(confirmation != null ? confirmation.getReceiptImageUrl() : null)
                 .submittedAt(confirmation != null ? confirmation.getSubmittedAt() : null)
+                .reviewedAt(confirmation != null ? confirmation.getReviewedAt() : null)
                 .orderTotal(order.getTotalAmount())
                 .payerName(confirmation != null ? confirmation.getPayerName() : null)
+                .reviewNote(confirmation != null ? confirmation.getReviewNote() : null)
                 .build();
     }
 }

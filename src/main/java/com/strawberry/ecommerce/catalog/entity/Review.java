@@ -1,6 +1,8 @@
 package com.strawberry.ecommerce.catalog.entity;
 
 import com.strawberry.ecommerce.user.entity.User;
+import com.strawberry.ecommerce.order.entity.Order;
+import com.strawberry.ecommerce.order.entity.OrderItem;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -27,6 +29,14 @@ public class Review {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_id")
+    private Order order;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "order_item_id")
+    private OrderItem orderItem;
 
     @Column(columnDefinition = "TEXT")
     private String content;

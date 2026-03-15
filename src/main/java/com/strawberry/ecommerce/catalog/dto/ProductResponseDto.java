@@ -18,6 +18,7 @@ public class ProductResponseDto {
     private String title;
     private String brand;
     private String mainImage;
+    private BigDecimal basePrice;
     private BigDecimal minPrice;
     private BigDecimal discountPrice;
     private Boolean inStock;
@@ -27,4 +28,7 @@ public class ProductResponseDto {
     private String categoryName;
     private Long wbNmId;
     private String vendorCode;
+    private UUID defaultVariantId;
+    private BigDecimal averageRate;
+    private Integer reviewCount;
 }

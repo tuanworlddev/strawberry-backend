@@ -2,8 +2,11 @@ package com.strawberry.ecommerce.shipping.controller;
 
 import com.strawberry.ecommerce.common.security.UserDetailsImpl;
 import com.strawberry.ecommerce.shipping.dto.CreateShipmentRequestDto;
+import com.strawberry.ecommerce.shipping.dto.DeliveryIssueResponseDto;
+import com.strawberry.ecommerce.shipping.dto.DeliveryIssueStatusUpdateRequestDto;
 import com.strawberry.ecommerce.shipping.dto.ShipmentResponseDto;
 import com.strawberry.ecommerce.shipping.entity.ShipmentStatus;
+import com.strawberry.ecommerce.shipping.service.DeliveryIssueService;
 import com.strawberry.ecommerce.shipping.service.SellerShipmentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,6 +29,7 @@ import com.strawberry.ecommerce.shop.service.ShopOwnershipService;
 public class SellerShipmentController {
 
     private final SellerShipmentService shipmentService;
+    private final DeliveryIssueService deliveryIssueService;
     private final ShopOwnershipService shopOwnershipService;
 
     @PostMapping("/orders/{orderId}/ship")
@@ -60,5 +64,27 @@ public class SellerShipmentController {
             @PathVariable UUID shopId) {
         shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
         return ResponseEntity.ok(shipmentService.getShopShipments(shopId));
+    }
+
+    @GetMapping("/delivery-issues")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Get customer-reported delivery issues for the shop")
+    public ResponseEntity<List<DeliveryIssueResponseDto>> getDeliveryIssues(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId) {
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        return ResponseEntity.ok(deliveryIssueService.getShopIssues(shopId));
+    }
+
+    @PutMapping("/delivery-issues/{issueId}/status")
+    @PreAuthorize("hasRole('SELLER')")
+    @Operation(summary = "Update delivery issue status")
+    public ResponseEntity<DeliveryIssueResponseDto> updateDeliveryIssueStatus(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID shopId,
+            @PathVariable UUID issueId,
+            @RequestBody DeliveryIssueStatusUpdateRequestDto request) {
+        shopOwnershipService.validateAndGetShop(shopId, userDetails.getId());
+        return ResponseEntity.ok(deliveryIssueService.updateStatus(shopId, issueId, request.getStatus()));
     }
 }

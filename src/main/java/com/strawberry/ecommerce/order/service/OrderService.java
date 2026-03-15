@@ -9,6 +9,8 @@ import com.strawberry.ecommerce.catalog.entity.ProductVariant;
 import com.strawberry.ecommerce.catalog.repository.ProductVariantRepository;
 import com.strawberry.ecommerce.common.exception.ApiException;
 import com.strawberry.ecommerce.common.service.CloudinaryService;
+import com.strawberry.ecommerce.catalog.entity.Review;
+import com.strawberry.ecommerce.catalog.repository.ReviewRepository;
 import com.strawberry.ecommerce.order.dto.CheckoutRequestDto;
 import com.strawberry.ecommerce.order.dto.OrderItemResponseDto;
 import com.strawberry.ecommerce.order.dto.OrderResponseDto;
@@ -18,6 +20,7 @@ import com.strawberry.ecommerce.order.repository.OrderRepository;
 import com.strawberry.ecommerce.order.repository.PaymentConfirmationRepository;
 import com.strawberry.ecommerce.shipping.entity.ShippingMethod;
 import com.strawberry.ecommerce.shipping.entity.ShippingZone;
+import com.strawberry.ecommerce.shipping.service.DeliveryIssueService;
 import com.strawberry.ecommerce.shipping.repository.ShippingMethodRepository;
 import com.strawberry.ecommerce.shipping.repository.ShippingZoneRepository;
 import com.strawberry.ecommerce.shipping.service.ShippingRateService;
@@ -33,7 +36,6 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -48,10 +50,12 @@ public class OrderService {
     private final ProductVariantRepository variantRepository;
     private final UserRepository userRepository;
     private final PaymentConfirmationRepository paymentConfirmationRepository;
+    private final ReviewRepository reviewRepository;
     private final CloudinaryService cloudinaryService;
     private final ShippingRateService shippingRateService;
     private final ShippingZoneRepository shippingZoneRepository;
     private final ShippingMethodRepository shippingMethodRepository;
+    private final DeliveryIssueService deliveryIssueService;
 
     @Transactional
     public List<OrderResponseDto> checkout(UUID customerId, CheckoutRequestDto req) {
@@ -69,8 +73,9 @@ public class OrderService {
                 .orElseThrow(() -> new ApiException("Invalid shipping zone ID", HttpStatus.BAD_REQUEST));
         ShippingMethod shippingMethod = shippingMethodRepository.findById(req.getShippingMethodId())
                 .orElseThrow(() -> new ApiException("Invalid shipping method ID", HttpStatus.BAD_REQUEST));
-        
-        BigDecimal shippingCostPerOrder = shippingRateService.calculateShippingCost(shippingZone.getId(), shippingMethod.getId());
+
+        BigDecimal shippingCostPerOrder = shippingRateService.calculateShippingCost(shippingZone.getId(),
+                shippingMethod.getId());
 
         // Group cart items by shop
         Map<Shop, List<CartItem>> itemsByShop = cart.getItems().stream()
@@ -110,13 +115,30 @@ public class OrderService {
                 ProductVariant variant = cartItem.getVariant();
                 Product product = variant.getProduct();
 
-                // Re-validate stock
-                int availableStock = variant.getStockQuantity() - variant.getReservedStock();
-                if (cartItem.getQuantity() > availableStock) {
-                    throw new ApiException("Insufficient stock for product " + product.getWbTitle(), HttpStatus.BAD_REQUEST);
+                // Groups: [Shop Active, Product Active, Variant Active, Price Configured, Stock
+                // Available]
+                if (!"ACTIVE".equals(shop.getStatus().name())) {
+                    throw new ApiException("Shop " + shop.getName() + " is currently inactive", HttpStatus.BAD_REQUEST);
                 }
                 if (!"ACTIVE".equals(product.getVisibility()) || !Boolean.TRUE.equals(variant.getIsActive())) {
-                    throw new ApiException("Product " + product.getWbTitle() + " is no longer available", HttpStatus.BAD_REQUEST);
+                    throw new ApiException("Product " + product.getWbTitle() + " is no longer available",
+                            HttpStatus.BAD_REQUEST);
+                }
+
+                BigDecimal price = (variant.getDiscountPrice() != null
+                        && variant.getDiscountPrice().compareTo(BigDecimal.ZERO) > 0)
+                                ? variant.getDiscountPrice()
+                                : variant.getBasePrice();
+
+                if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new ApiException("Price is not configured for " + product.getWbTitle(),
+                            HttpStatus.BAD_REQUEST);
+                }
+
+                int availableStock = variant.getStockQuantity() - variant.getReservedStock();
+                if (cartItem.getQuantity() > availableStock) {
+                    throw new ApiException("Insufficient stock for product " + product.getWbTitle(),
+                            HttpStatus.BAD_REQUEST);
                 }
 
                 // Reserve Stock
@@ -124,11 +146,13 @@ public class OrderService {
                 variant.setReservedStock(variant.getReservedStock() + cartItem.getQuantity());
                 variantRepository.save(variant);
 
-                BigDecimal price = variant.getDiscountPrice() != null ? variant.getDiscountPrice() : variant.getBasePrice();
-                totalAmount = totalAmount.add(price.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
+                BigDecimal price2 = variant.getDiscountPrice() != null ? variant.getDiscountPrice()
+                        : variant.getBasePrice();
+                totalAmount = totalAmount.add(price2.multiply(BigDecimal.valueOf(cartItem.getQuantity())));
 
                 String titleSnapshot = product.getLocalTitle() != null ? product.getLocalTitle() : product.getWbTitle();
-                String attributesSnapshot = String.format("Tech Size: %s, WB Size: %s", variant.getTechSize(), variant.getWbSize());
+                String attributesSnapshot = String.format("Tech Size: %s, WB Size: %s", variant.getTechSize(),
+                        variant.getWbSize());
                 String imageSnapshot = product.getImages().isEmpty() ? null : product.getImages().get(0).getWbUrl();
 
                 OrderItem orderItem = OrderItem.builder()
@@ -175,13 +199,27 @@ public class OrderService {
     }
 
     @Transactional
-    public OrderResponseDto submitPaymentConfirmation(UUID customerId, UUID orderId, MultipartFile receiptImage, 
-                                                      String payerName, BigDecimal amount, LocalDateTime transferTime) {
+    public OrderResponseDto submitPaymentConfirmation(UUID customerId, UUID orderId, MultipartFile receiptImage,
+            String payerName, BigDecimal amount, LocalDateTime transferTime) {
         Order order = orderRepository.findByIdAndCustomerId(orderId, customerId)
                 .orElseThrow(() -> new ApiException("Order not found or access denied", HttpStatus.NOT_FOUND));
 
-        if (order.getPaymentStatus() == PaymentStatus.WAITING_CONFIRMATION || order.getPaymentStatus() == PaymentStatus.APPROVED) {
-            throw new ApiException("Payment confirmation already pending or approved", HttpStatus.BAD_REQUEST);
+        if (order.getPaymentStatus() != PaymentStatus.PENDING
+                && order.getPaymentStatus() != PaymentStatus.REJECTED) {
+            throw new ApiException("Order is not eligible for payment confirmation in its current payment state", HttpStatus.BAD_REQUEST);
+        }
+
+        if (receiptImage == null || receiptImage.isEmpty()) {
+            throw new ApiException("Receipt image is required", HttpStatus.BAD_REQUEST);
+        }
+        if (payerName == null || payerName.isBlank()) {
+            throw new ApiException("Payer name is required", HttpStatus.BAD_REQUEST);
+        }
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ApiException("Transfer amount must be greater than zero", HttpStatus.BAD_REQUEST);
+        }
+        if (transferTime == null) {
+            throw new ApiException("Transfer time is required", HttpStatus.BAD_REQUEST);
         }
 
         try {
@@ -193,6 +231,7 @@ public class OrderService {
                     .transferAmount(amount)
                     .transferTime(transferTime)
                     .receiptImageUrl(receiptUrl)
+                    .reviewNote(null)
                     .build();
 
             paymentConfirmationRepository.save(confirmation);
@@ -207,9 +246,26 @@ public class OrderService {
         }
     }
 
+    @Transactional
+    public OrderResponseDto completeOrder(UUID customerId, UUID orderId) {
+        Order order = orderRepository.findByIdAndCustomerId(orderId, customerId)
+                .orElseThrow(() -> new ApiException("Order not found", HttpStatus.NOT_FOUND));
+
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            throw new ApiException("Only delivered orders can be completed", HttpStatus.BAD_REQUEST);
+        }
+
+        if (order.getCustomerCompletedAt() == null) {
+            order.setCustomerCompletedAt(LocalDateTime.now());
+            orderRepository.save(order);
+        }
+
+        return mapToResponse(order);
+    }
+
     private OrderResponseDto mapToResponse(Order order) {
-        String receiptUrl = paymentConfirmationRepository.findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
-                .map(PaymentConfirmation::getReceiptImageUrl)
+        PaymentConfirmation latestConfirmation = paymentConfirmationRepository
+                .findFirstByOrderIdOrderBySubmittedAtDesc(order.getId())
                 .orElse(null);
 
         return OrderResponseDto.builder()
@@ -230,7 +286,16 @@ public class OrderService {
                 .shippingZoneName(order.getShippingZone() != null ? order.getShippingZone().getName() : null)
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
-                .receiptImageUrl(receiptUrl)
+                .receiptImageUrl(latestConfirmation != null ? latestConfirmation.getReceiptImageUrl() : null)
+                .payerName(latestConfirmation != null ? latestConfirmation.getPayerName() : null)
+                .transferAmount(latestConfirmation != null ? latestConfirmation.getTransferAmount() : null)
+                .transferTime(latestConfirmation != null ? latestConfirmation.getTransferTime() : null)
+                .paymentSubmittedAt(latestConfirmation != null ? latestConfirmation.getSubmittedAt() : null)
+                .paymentReviewedAt(latestConfirmation != null ? latestConfirmation.getReviewedAt() : null)
+                .paymentReviewNote(latestConfirmation != null ? latestConfirmation.getReviewNote() : null)
+                .shopPaymentInstructions(order.getShop().getPaymentInstructions())
+                .customerCompletedAt(order.getCustomerCompletedAt())
+                .deliveryIssue(deliveryIssueService.getLatestForOrder(order.getId()))
                 .items(order.getItems().stream().map(item -> OrderItemResponseDto.builder()
                         .id(item.getId())
                         .variantId(item.getVariant() != null ? item.getVariant().getId() : null)
@@ -241,8 +306,11 @@ public class OrderService {
                         .variantAttributesSnapshot(item.getVariantAttributesSnapshot())
                         .productImageSnapshot(item.getProductImageSnapshot())
                         .wbNmIdSnapshot(item.getWbNmIdSnapshot())
-                        .build()
-                ).collect(Collectors.toList()))
+                        .reviewId(reviewRepository.findByOrderItemId(item.getId()).map(Review::getId).orElse(null))
+                        .reviewRate(reviewRepository.findByOrderItemId(item.getId()).map(Review::getRate).orElse(null))
+                        .reviewContent(reviewRepository.findByOrderItemId(item.getId()).map(Review::getContent).orElse(null))
+                        .reviewCreatedAt(reviewRepository.findByOrderItemId(item.getId()).map(Review::getCreatedAt).orElse(null))
+                        .build()).collect(Collectors.toList()))
                 .build();
     }
 }

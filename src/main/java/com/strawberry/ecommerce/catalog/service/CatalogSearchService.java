@@ -39,19 +39,30 @@ public class CatalogSearchService {
             BigDecimal minPrice,
             BigDecimal maxPrice,
             Boolean inStockOnly,
+            UUID excludeId,
             Pageable pageable) {
 
         Specification<Product> spec = (root, q, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
-            // 1. Core Visibility Rules
+            // 1. Core Visibility Rules (Readiness Governance)
             predicates.add(cb.equal(root.get("visibility"), "ACTIVE"));
             predicates.add(cb.isNotNull(root.get("seoSlug")));
             predicates.add(cb.isNotEmpty(root.get("variants")));
+            
+            // Shop must be ACTIVE
+            predicates.add(cb.equal(root.get("shop").get("status"), "ACTIVE"));
 
             // Join variants for price and stock filters
             Join<Product, ProductVariant> variants = root.join("variants");
             predicates.add(cb.isTrue(variants.get("isActive")));
+
+            // Readiness Rule: Effective Price > 0
+            // logic: coalesce(discountPrice, basePrice) > 0
+            predicates.add(cb.greaterThan(
+                cb.coalesce(variants.get("discountPrice"), variants.get("basePrice")), 
+                BigDecimal.ZERO
+            ));
 
             // 2. Filters
             if (query != null && !query.isEmpty()) {
@@ -106,14 +117,20 @@ public class CatalogSearchService {
             }
 
             if (minPrice != null) {
-                predicates.add(cb.greaterThanOrEqualTo(variants.get("basePrice"), minPrice));
+                predicates.add(cb.greaterThanOrEqualTo(cb.coalesce(variants.get("discountPrice"), variants.get("basePrice")), minPrice));
             }
             if (maxPrice != null) {
-                predicates.add(cb.lessThanOrEqualTo(variants.get("basePrice"), maxPrice));
+                predicates.add(cb.lessThanOrEqualTo(cb.coalesce(variants.get("discountPrice"), variants.get("basePrice")), maxPrice));
             }
 
+            // By default, search endpoint only returns products in stock for customer feeds
+            // Unless explicitly asked otherwise (or we can make this the default)
             if (Boolean.TRUE.equals(inStockOnly)) {
                 predicates.add(cb.greaterThan(variants.get("stockQuantity"), 0));
+            }
+            
+            if (excludeId != null) {
+                predicates.add(cb.notEqual(root.get("id"), excludeId));
             }
 
             // Ensure we only get distinct products because of variant join
@@ -176,18 +193,29 @@ public class CatalogSearchService {
     }
 
     private ProductResponseDto mapToResponse(Product p) {
+        BigDecimal basePrice = p.getVariants().stream()
+                .filter(ProductVariant::getIsActive)
+                .map(ProductVariant::getBasePrice)
+                .filter(price -> price != null && price.compareTo(BigDecimal.ZERO) > 0)
+                .min(BigDecimal::compareTo)
+                .orElse(BigDecimal.ZERO);
+
         BigDecimal minPrice = p.getVariants().stream()
                 .filter(ProductVariant::getIsActive)
                 .map(v -> v.getDiscountPrice() != null ? v.getDiscountPrice() : v.getBasePrice())
                 .min(BigDecimal::compareTo)
                 .orElse(BigDecimal.ZERO);
-                
+
         BigDecimal discountPrice = p.getVariants().stream()
                 .filter(ProductVariant::getIsActive)
                 .filter(v -> v.getDiscountPrice() != null)
                 .map(ProductVariant::getDiscountPrice)
                 .min(BigDecimal::compareTo)
                 .orElse(null);
+
+        if (discountPrice != null && basePrice.compareTo(BigDecimal.ZERO) > 0 && discountPrice.compareTo(basePrice) >= 0) {
+            discountPrice = null;
+        }
 
         boolean inStock = p.getVariants().stream()
                 .filter(ProductVariant::getIsActive)
@@ -201,6 +229,7 @@ public class CatalogSearchService {
                 .title(p.getLocalTitle() != null ? p.getLocalTitle() : p.getWbTitle())
                 .brand(p.getBrand())
                 .mainImage(mainImg)
+                .basePrice(basePrice)
                 .minPrice(minPrice)
                 .discountPrice(discountPrice)
                 .inStock(inStock)
@@ -210,6 +239,13 @@ public class CatalogSearchService {
                 .categoryName(p.getCategory() != null ? p.getCategory().getName() : p.getWbCategoryName())
                 .wbNmId(p.getWbNmId())
                 .vendorCode(p.getWbVendorCode())
+                .defaultVariantId(p.getVariants().stream()
+                        .filter(ProductVariant::getIsActive)
+                        .findFirst()
+                        .map(ProductVariant::getId)
+                        .orElse(null))
+                .averageRate(p.getAverageRating())
+                .reviewCount(p.getFeedbackCount())
                 .build();
     }
 

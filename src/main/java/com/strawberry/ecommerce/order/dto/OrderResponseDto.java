@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.strawberry.ecommerce.shipping.dto.DeliveryIssueResponseDto;
+
 @Data
 @Builder
 public class OrderResponseDto {
@@ -30,4 +32,13 @@ public class OrderResponseDto {
     private LocalDateTime updatedAt;
     private List<OrderItemResponseDto> items;
     private String receiptImageUrl; // Optional latest receipt image
+    private String payerName;
+    private BigDecimal transferAmount;
+    private LocalDateTime transferTime;
+    private LocalDateTime paymentSubmittedAt;
+    private LocalDateTime paymentReviewedAt;
+    private String paymentReviewNote;
+    private String shopPaymentInstructions;
+    private LocalDateTime customerCompletedAt;
+    private DeliveryIssueResponseDto deliveryIssue;
 }

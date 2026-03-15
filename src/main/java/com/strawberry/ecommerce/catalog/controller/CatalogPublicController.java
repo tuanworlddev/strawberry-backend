@@ -1,7 +1,5 @@
 package com.strawberry.ecommerce.catalog.controller;
 
-import com.strawberry.ecommerce.catalog.entity.Product;
-import com.strawberry.ecommerce.catalog.repository.ProductRepository;
 import com.strawberry.ecommerce.catalog.dto.CatalogFiltersDto;
 import com.strawberry.ecommerce.catalog.dto.ProductDetailResponseDto;
 import com.strawberry.ecommerce.catalog.dto.ProductResponseDto;
@@ -38,7 +36,7 @@ public class CatalogPublicController {
             @RequestParam(required = false) Boolean inStock,
             Pageable pageable) {
         
-        return ResponseEntity.ok(searchService.search(search, shopId, shopSlug, categoryId, brand, minPrice, maxPrice, inStock, pageable));
+        return ResponseEntity.ok(searchService.search(search, shopId, shopSlug, categoryId, brand, minPrice, maxPrice, inStock, null, pageable));
     }
 
     @GetMapping("/products/{slug}")

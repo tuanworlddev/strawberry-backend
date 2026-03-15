@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Data
@@ -18,4 +19,8 @@ public class OrderItemResponseDto {
     private String variantAttributesSnapshot;
     private String productImageSnapshot;
     private Long wbNmIdSnapshot;
+    private UUID reviewId;
+    private Integer reviewRate;
+    private String reviewContent;
+    private LocalDateTime reviewCreatedAt;
 }

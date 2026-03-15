@@ -17,9 +17,13 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
            "ORDER BY c.name ASC")
     List<CategoryResponseDto> findCategoriesByShopId(@Param("shopId") UUID shopId);
 
-    @Query("SELECT new com.strawberry.ecommerce.catalog.dto.CategoryResponseDto(c.id, c.name, COUNT(p.id)) " +
-           "FROM Category c JOIN Product p ON p.category = c " +
+    @Query("SELECT new com.strawberry.ecommerce.catalog.dto.CategoryResponseDto(c.id, c.name, COUNT(DISTINCT p.id)) " +
+           "FROM Category c JOIN Product p ON p.category = c JOIN p.variants v " +
            "WHERE p.visibility = 'ACTIVE' AND p.seoSlug IS NOT NULL " +
+           "AND p.shop.status = 'ACTIVE' " +
+           "AND v.isActive = true " +
+           "AND v.stockQuantity > 0 " +
+           "AND COALESCE(v.discountPrice, v.basePrice) > 0 " +
            "GROUP BY c.id, c.name " +
            "ORDER BY c.name ASC")
     List<CategoryResponseDto> findActiveCategoriesWithCounts();

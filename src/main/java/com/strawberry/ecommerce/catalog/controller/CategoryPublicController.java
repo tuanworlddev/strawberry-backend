@@ -46,6 +46,7 @@ public class CategoryPublicController {
                 null,
                 null,
                 null,
+                null,
                 pageable
         ));
     }

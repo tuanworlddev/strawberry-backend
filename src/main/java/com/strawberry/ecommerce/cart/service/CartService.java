@@ -55,6 +55,18 @@ public class CartService {
             throw new ApiException("Product is not available for sale", HttpStatus.BAD_REQUEST);
         }
 
+        if (!"ACTIVE".equals(product.getShop().getStatus().name())) {
+            throw new ApiException("Shop is currently inactive", HttpStatus.BAD_REQUEST);
+        }
+
+        BigDecimal effectivePrice = (variant.getDiscountPrice() != null && variant.getDiscountPrice().compareTo(BigDecimal.ZERO) > 0) 
+            ? variant.getDiscountPrice() 
+            : variant.getBasePrice();
+
+        if (effectivePrice == null || effectivePrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ApiException("Product price is not configured yet", HttpStatus.BAD_REQUEST);
+        }
+
         int availableStock = variant.getStockQuantity() - variant.getReservedStock();
 
         Optional<CartItem> existingItemOpt = cartItemRepository.findByCartIdAndVariantId(cart.getId(), variant.getId());
@@ -149,9 +161,15 @@ public class CartService {
                 .map(item -> {
                     ProductVariant v = item.getVariant();
                     Product p = v.getProduct();
-                    BigDecimal price = v.getDiscountPrice() != null ? v.getDiscountPrice() : v.getBasePrice();
+                    BigDecimal price = (v.getDiscountPrice() != null && v.getDiscountPrice().compareTo(BigDecimal.ZERO) > 0) 
+                        ? v.getDiscountPrice() 
+                        : v.getBasePrice();
                     int availableStock = v.getStockQuantity() - v.getReservedStock();
-                    boolean isAvailable = availableStock >= item.getQuantity() && "ACTIVE".equals(p.getVisibility()) && Boolean.TRUE.equals(v.getIsActive());
+                    boolean isAvailable = availableStock >= item.getQuantity() 
+                        && "ACTIVE".equals(p.getVisibility()) 
+                        && "ACTIVE".equals(p.getShop().getStatus().name())
+                        && Boolean.TRUE.equals(v.getIsActive())
+                        && price != null && price.compareTo(BigDecimal.ZERO) > 0;
                     
                     String image = p.getImages().isEmpty() ? null : p.getImages().get(0).getWbUrl();
 

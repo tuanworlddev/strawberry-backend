@@ -74,6 +74,7 @@ public class ShopPublicController {
                 minPrice,
                 maxPrice,
                 inStock,
+                null,
                 pageable
         ));
     }

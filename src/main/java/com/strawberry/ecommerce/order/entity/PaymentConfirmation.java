@@ -41,4 +41,7 @@ public class PaymentConfirmation {
     private LocalDateTime submittedAt;
 
     private LocalDateTime reviewedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String reviewNote;
 }

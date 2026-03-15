@@ -88,6 +88,8 @@ public class Order {
     @UpdateTimestamp
     private LocalDateTime updatedAt;
 
+    private LocalDateTime customerCompletedAt;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<OrderItem> items = new ArrayList<>();

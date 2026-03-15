@@ -1,9 +1,15 @@
 package com.strawberry.ecommerce.order.controller;
 
 import com.strawberry.ecommerce.common.security.UserDetailsImpl;
+import com.strawberry.ecommerce.catalog.dto.ReviewCreateRequestDto;
+import com.strawberry.ecommerce.catalog.dto.ReviewResponseDto;
+import com.strawberry.ecommerce.catalog.service.ReviewService;
 import com.strawberry.ecommerce.order.dto.CheckoutRequestDto;
 import com.strawberry.ecommerce.order.dto.OrderResponseDto;
 import com.strawberry.ecommerce.order.service.OrderService;
+import com.strawberry.ecommerce.shipping.dto.DeliveryIssueRequestDto;
+import com.strawberry.ecommerce.shipping.dto.DeliveryIssueResponseDto;
+import com.strawberry.ecommerce.shipping.service.DeliveryIssueService;
 import com.strawberry.ecommerce.shipping.dto.ShipmentResponseDto;
 import com.strawberry.ecommerce.shipping.service.CustomerTrackingService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,6 +35,8 @@ import java.util.UUID;
 public class CustomerOrderController {
 
     private final OrderService orderService;
+    private final ReviewService reviewService;
+    private final DeliveryIssueService deliveryIssueService;
     private final CustomerTrackingService trackingService;
 
     @PostMapping("/checkout")
@@ -75,5 +83,40 @@ public class CustomerOrderController {
             @AuthenticationPrincipal UserDetailsImpl userDetails,
             @PathVariable UUID orderId) {
         return ResponseEntity.ok(trackingService.getTrackingInfo(userDetails.getId(), orderId));
+    }
+
+    @PostMapping("/{orderId}/complete")
+    @Operation(summary = "Customer confirms order completion after delivery")
+    public ResponseEntity<OrderResponseDto> completeOrder(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID orderId) {
+        return ResponseEntity.ok(orderService.completeOrder(userDetails.getId(), orderId));
+    }
+
+    @PostMapping("/{orderId}/delivery-issues")
+    @Operation(summary = "Report that a delivered order was not actually received")
+    public ResponseEntity<DeliveryIssueResponseDto> reportDeliveryIssue(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID orderId,
+            @RequestBody(required = false) DeliveryIssueRequestDto request) {
+        return ResponseEntity.ok(deliveryIssueService.reportNotReceived(
+                userDetails.getId(),
+                orderId,
+                request != null ? request.getNote() : null));
+    }
+
+    @PostMapping("/{orderId}/items/{orderItemId}/review")
+    @Operation(summary = "Submit a review for a delivered purchased item")
+    public ResponseEntity<ReviewResponseDto> submitReview(
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @PathVariable UUID orderId,
+            @PathVariable UUID orderItemId,
+            @Valid @RequestBody ReviewCreateRequestDto request) {
+        return ResponseEntity.ok(reviewService.submitReview(
+                userDetails.getId(),
+                orderId,
+                orderItemId,
+                request.getRate(),
+                request.getContent()));
     }
 }
